@@ -61,6 +61,8 @@ I built this watchdog to run that view for you. Every hour on weekdays, it searc
 
 ## 2. Architecture and Data Flow
 
+![Workflow Overview](workflow-overview.png)
+
 ```mermaid
 flowchart LR
     SCH[Hourly Watchdog Schedule<br/>:05, Mon–Fri UTC] --> CFG
