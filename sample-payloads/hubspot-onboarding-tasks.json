@@ -1,0 +1,475 @@
+{
+  "_comment": "Synthetic fixture in the HubSpot custom object search response shape (object type 2-345001 is a placeholder). All companies, people, emails and IDs are fictitious. Dates are given as _relative offsets and resolved against the current time by the sandbox node; _scenario documents the expected result (README \u00a75).",
+  "objectType": "2-345001",
+  "results": [
+    {
+      "id": "900201",
+      "properties": {
+        "hs_object_id": "900201",
+        "task_name": "SSO / SAML configuration",
+        "milestone": "Technical Setup",
+        "task_status": "in_progress",
+        "is_critical_path": "true",
+        "due_date": null,
+        "hubspot_owner_id": "87000001",
+        "is_test_record": "false",
+        "onboarding_status": "On Track",
+        "last_alert_timestamp": null,
+        "last_alert_tier": null,
+        "hs_lastmodifieddate": null
+      },
+      "companyId": "7000101",
+      "contactId": "9100101",
+      "_relative": {
+        "dueInHours": -100,
+        "modifiedDaysAgo": 0.5
+      },
+      "_scenario": "critical: critical path, 96h past grace"
+    },
+    {
+      "id": "900202",
+      "properties": {
+        "hs_object_id": "900202",
+        "task_name": "Historical order data migration",
+        "milestone": "Data Migration",
+        "task_status": "in_progress",
+        "is_critical_path": "false",
+        "due_date": null,
+        "hubspot_owner_id": "87000001",
+        "is_test_record": "false",
+        "onboarding_status": "On Track",
+        "last_alert_timestamp": null,
+        "last_alert_tier": null,
+        "hs_lastmodifieddate": null
+      },
+      "companyId": "7000101",
+      "contactId": "9100101",
+      "_relative": {
+        "dueInHours": -30,
+        "modifiedDaysAgo": 0.5
+      },
+      "_scenario": "high: 26h past grace"
+    },
+    {
+      "id": "900203",
+      "properties": {
+        "hs_object_id": "900203",
+        "task_name": "Contact and account import",
+        "milestone": "Data Migration",
+        "task_status": "in_progress",
+        "is_critical_path": "false",
+        "due_date": null,
+        "hubspot_owner_id": "87000002",
+        "is_test_record": "false",
+        "onboarding_status": "On Track",
+        "last_alert_timestamp": null,
+        "last_alert_tier": null,
+        "hs_lastmodifieddate": null
+      },
+      "companyId": "7000102",
+      "contactId": "9100102",
+      "_relative": {
+        "dueInHours": -10,
+        "modifiedDaysAgo": 0.5
+      },
+      "_scenario": "moderate: 6h past grace"
+    },
+    {
+      "id": "900204",
+      "properties": {
+        "hs_object_id": "900204",
+        "task_name": "API credentials handover",
+        "milestone": "Technical Setup",
+        "task_status": "in_progress",
+        "is_critical_path": "true",
+        "due_date": null,
+        "hubspot_owner_id": "87000002",
+        "is_test_record": "false",
+        "onboarding_status": "On Track",
+        "last_alert_timestamp": null,
+        "last_alert_tier": null,
+        "hs_lastmodifieddate": null
+      },
+      "companyId": "7000102",
+      "contactId": "9100102",
+      "_relative": {
+        "dueInHours": -50,
+        "modifiedDaysAgo": 0.5
+      },
+      "_scenario": "high: critical path but under 72h"
+    },
+    {
+      "id": "900205",
+      "properties": {
+        "hs_object_id": "900205",
+        "task_name": "Kickoff call",
+        "milestone": "Kickoff",
+        "task_status": "in_progress",
+        "is_critical_path": "false",
+        "due_date": null,
+        "hubspot_owner_id": "87000003",
+        "is_test_record": "false",
+        "onboarding_status": "On Track",
+        "last_alert_timestamp": null,
+        "last_alert_tier": null,
+        "hs_lastmodifieddate": null
+      },
+      "companyId": "7000103",
+      "contactId": "9100103",
+      "_relative": {
+        "dueInHours": -2,
+        "modifiedDaysAgo": 0.5
+      },
+      "_scenario": "low: inside 4h grace period"
+    },
+    {
+      "id": "900206",
+      "properties": {
+        "hs_object_id": "900206",
+        "task_name": "Admin training session",
+        "milestone": "Training",
+        "task_status": "in_progress",
+        "is_critical_path": "false",
+        "due_date": null,
+        "hubspot_owner_id": "87000003",
+        "is_test_record": "false",
+        "onboarding_status": "On Track",
+        "last_alert_timestamp": null,
+        "last_alert_tier": null,
+        "hs_lastmodifieddate": null
+      },
+      "companyId": "7000103",
+      "contactId": "9100103",
+      "_relative": {
+        "dueInHours": 20,
+        "modifiedDaysAgo": 0.5
+      },
+      "_scenario": "low: due within 24h"
+    },
+    {
+      "id": "900207",
+      "properties": {
+        "hs_object_id": "900207",
+        "task_name": "Go-live readiness review",
+        "milestone": "Go-Live",
+        "task_status": "in_progress",
+        "is_critical_path": "false",
+        "due_date": null,
+        "hubspot_owner_id": "87000002",
+        "is_test_record": "false",
+        "onboarding_status": "On Track",
+        "last_alert_timestamp": null,
+        "last_alert_tier": null,
+        "hs_lastmodifieddate": null
+      },
+      "companyId": "7000104",
+      "contactId": "9100104",
+      "_relative": {
+        "dueInHours": 200,
+        "modifiedDaysAgo": 0.5
+      },
+      "_scenario": "on_track: due in 8 days"
+    },
+    {
+      "id": "900208",
+      "properties": {
+        "hs_object_id": "900208",
+        "task_name": "Workspace provisioning",
+        "milestone": "Technical Setup",
+        "task_status": "completed",
+        "is_critical_path": "true",
+        "due_date": null,
+        "hubspot_owner_id": "87000002",
+        "is_test_record": "false",
+        "onboarding_status": "On Track",
+        "last_alert_timestamp": null,
+        "last_alert_tier": null,
+        "hs_lastmodifieddate": null
+      },
+      "companyId": "7000104",
+      "contactId": "9100104",
+      "_relative": {
+        "dueInHours": -80,
+        "modifiedDaysAgo": 0.5
+      },
+      "_scenario": "skipped: completed"
+    },
+    {
+      "id": "900209",
+      "properties": {
+        "hs_object_id": "900209",
+        "task_name": "[TEST] Sandbox onboarding task",
+        "milestone": "Technical Setup",
+        "task_status": "in_progress",
+        "is_critical_path": "true",
+        "due_date": null,
+        "hubspot_owner_id": "87000001",
+        "is_test_record": "true",
+        "onboarding_status": "On Track",
+        "last_alert_timestamp": null,
+        "last_alert_tier": null,
+        "hs_lastmodifieddate": null
+      },
+      "companyId": "7000101",
+      "contactId": "9100101",
+      "_relative": {
+        "dueInHours": -150,
+        "modifiedDaysAgo": 0.5
+      },
+      "_scenario": "skipped: is_test_record"
+    },
+    {
+      "id": "900210",
+      "properties": {
+        "hs_object_id": "900210",
+        "task_name": "Data warehouse connector",
+        "milestone": "Technical Setup",
+        "task_status": "in_progress",
+        "is_critical_path": "true",
+        "due_date": null,
+        "hubspot_owner_id": "87000003",
+        "is_test_record": "false",
+        "onboarding_status": "On Track",
+        "last_alert_timestamp": null,
+        "last_alert_tier": null,
+        "hs_lastmodifieddate": null
+      },
+      "companyId": "7000107",
+      "contactId": null,
+      "_relative": {
+        "dueInHours": -120,
+        "modifiedDaysAgo": 0.5
+      },
+      "_scenario": "skipped: test company name"
+    },
+    {
+      "id": "900211",
+      "properties": {
+        "hs_object_id": "900211",
+        "task_name": "Integration testing sign-off",
+        "milestone": "Technical Setup",
+        "task_status": "in_progress",
+        "is_critical_path": "true",
+        "due_date": null,
+        "hubspot_owner_id": "87000001",
+        "is_test_record": "false",
+        "onboarding_status": "On Track",
+        "last_alert_timestamp": null,
+        "last_alert_tier": "critical",
+        "hs_lastmodifieddate": null
+      },
+      "companyId": "7000105",
+      "contactId": "9100105",
+      "_relative": {
+        "dueInHours": -80,
+        "modifiedDaysAgo": 0.5,
+        "lastAlertHoursAgo": 3
+      },
+      "_scenario": "suppressed: alerted 3h ago at same tier"
+    },
+    {
+      "id": "900212",
+      "properties": {
+        "hs_object_id": "900212",
+        "task_name": "Security questionnaire review",
+        "milestone": "Compliance",
+        "task_status": "in_progress",
+        "is_critical_path": "false",
+        "due_date": null,
+        "hubspot_owner_id": "87000001",
+        "is_test_record": "false",
+        "onboarding_status": "On Track",
+        "last_alert_timestamp": null,
+        "last_alert_tier": null,
+        "hs_lastmodifieddate": null
+      },
+      "companyId": "7000105",
+      "contactId": "9100105",
+      "_relative": {
+        "dueInHours": 72,
+        "modifiedDaysAgo": 9
+      },
+      "_scenario": "moderate: no activity for 9 days"
+    },
+    {
+      "id": "900213",
+      "properties": {
+        "hs_object_id": "900213",
+        "task_name": "Billing contact confirmation",
+        "milestone": "Billing Setup",
+        "task_status": "waiting_on_client",
+        "is_critical_path": "false",
+        "due_date": null,
+        "hubspot_owner_id": "87000003",
+        "is_test_record": "false",
+        "onboarding_status": "On Track",
+        "last_alert_timestamp": null,
+        "last_alert_tier": null,
+        "hs_lastmodifieddate": null
+      },
+      "companyId": "7000106",
+      "contactId": "9100106",
+      "_relative": {
+        "dueInHours": -200,
+        "modifiedDaysAgo": 0.5
+      },
+      "_scenario": "moderate: waiting on client (capped)"
+    },
+    {
+      "id": "900214",
+      "properties": {
+        "hs_object_id": "900214",
+        "task_name": "Custom report build",
+        "milestone": "Reporting",
+        "task_status": "in_progress",
+        "is_critical_path": "false",
+        "due_date": null,
+        "hubspot_owner_id": "87000003",
+        "is_test_record": "false",
+        "onboarding_status": "On Track",
+        "last_alert_timestamp": null,
+        "last_alert_tier": null,
+        "hs_lastmodifieddate": null
+      },
+      "companyId": "7000106",
+      "contactId": "9100106",
+      "_relative": {
+        "dueInHours": null,
+        "modifiedDaysAgo": 0.5
+      },
+      "_scenario": "skipped: no due date"
+    },
+    {
+      "id": "900215",
+      "properties": {
+        "hs_object_id": "900215",
+        "task_name": "Payment gateway sandbox setup",
+        "milestone": "Technical Setup",
+        "task_status": "in_progress",
+        "is_critical_path": "true",
+        "due_date": null,
+        "hubspot_owner_id": "",
+        "is_test_record": "false",
+        "onboarding_status": "On Track",
+        "last_alert_timestamp": null,
+        "last_alert_tier": null,
+        "hs_lastmodifieddate": null
+      },
+      "companyId": "7000104",
+      "contactId": "9100104",
+      "_relative": {
+        "dueInHours": -76.5,
+        "modifiedDaysAgo": 0.5
+      },
+      "_scenario": "critical: critical path 72.5h past grace, no owner \u2192 default PM"
+    }
+  ],
+  "companies": {
+    "7000101": {
+      "id": "7000101",
+      "properties": {
+        "name": "Apex Logistics",
+        "domain": "apexlogistics.example.com",
+        "customer_tier": "Enterprise"
+      }
+    },
+    "7000102": {
+      "id": "7000102",
+      "properties": {
+        "name": "Vanguard Cloud",
+        "domain": "vanguardcloud.example.com",
+        "customer_tier": "Growth"
+      }
+    },
+    "7000103": {
+      "id": "7000103",
+      "properties": {
+        "name": "Orchid Health",
+        "domain": "orchidhealth.example.com",
+        "customer_tier": "Mid-Market"
+      }
+    },
+    "7000104": {
+      "id": "7000104",
+      "properties": {
+        "name": "Summit Retail",
+        "domain": "summitretail.example.com",
+        "customer_tier": "Growth"
+      }
+    },
+    "7000105": {
+      "id": "7000105",
+      "properties": {
+        "name": "Brightwater Labs",
+        "domain": "brightwater.example.com",
+        "customer_tier": "Enterprise"
+      }
+    },
+    "7000106": {
+      "id": "7000106",
+      "properties": {
+        "name": "Northwind Media",
+        "domain": "northwindmedia.example.com",
+        "customer_tier": "Mid-Market"
+      }
+    },
+    "7000107": {
+      "id": "7000107",
+      "properties": {
+        "name": "QA Test Account",
+        "domain": "qa-test.example.com",
+        "customer_tier": "Internal"
+      }
+    }
+  },
+  "contacts": {
+    "9100101": {
+      "id": "9100101",
+      "properties": {
+        "firstname": "Sarah",
+        "lastname": "Jenkins",
+        "email": "sarah.jenkins@example.com"
+      }
+    },
+    "9100102": {
+      "id": "9100102",
+      "properties": {
+        "firstname": "Marcus",
+        "lastname": "Vance",
+        "email": "marcus.vance@example.com"
+      }
+    },
+    "9100103": {
+      "id": "9100103",
+      "properties": {
+        "firstname": "Priya",
+        "lastname": "Nair",
+        "email": "priya.nair@example.com"
+      }
+    },
+    "9100104": {
+      "id": "9100104",
+      "properties": {
+        "firstname": "Diego",
+        "lastname": "Alvarez",
+        "email": "diego.alvarez@example.com"
+      }
+    },
+    "9100105": {
+      "id": "9100105",
+      "properties": {
+        "firstname": "Hannah",
+        "lastname": "Cole",
+        "email": "hannah.cole@example.com"
+      }
+    },
+    "9100106": {
+      "id": "9100106",
+      "properties": {
+        "firstname": "Tom",
+        "lastname": "Becker",
+        "email": "tom.becker@example.com"
+      }
+    }
+  }
+}
