@@ -1,0 +1,2393 @@
+{
+  "name": "HubSpot Onboarding Milestone Stalled Task Alerter (dhRobin Systems)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## n8n-hubspot-onboarding-milestone-stalled-task-alerter\n**dhRobin Systems** · Hourly: HubSpot custom-object onboarding tasks (overdue past grace, or in progress without updates) → filter completed / test records → delay hours + severity tier (critical-path aware, waiting-on-client capped) → cooldown → Slack PM digest (+ critical channel) → optional record update → audit.\n\n**Safe by default.** With no environment variables set:\n- `SANDBOX_MODE=true`: synthetic tasks. **Zero HubSpot or Slack calls.**\n- `DRY_RUN=true`, `SEND_SLACK_ALERTS=false`, `WRITE_TO_HUBSPOT=false`.",
+        "height": 340,
+        "width": 680,
+        "color": 5
+      },
+      "id": "f9d9c977-dc93-5a90-bb08-ac8f58181a03",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        -540
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Severity tiers (delay = now − due − grace)\n- **critical**: critical-path task, delay > 72h\n- **high**: delay > 24h\n- **moderate**: overdue past grace · no update for 7 days · waiting on client (capped)\n- **low**: inside grace · due within 24h\n- **on_track**: due later\nAlerts at ≥ `ALERT_MIN_TIER` (moderate), once per `COOLDOWN_HOURS` per task.",
+        "height": 250,
+        "width": 440,
+        "color": 6
+      },
+      "id": "9c9d7c9e-d1ad-5014-944c-05c956232efa",
+      "name": "Tier Notice",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        -400
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Pinned synthetic payloads\nPinned: custom-object search (1 page), task → company / contact associations, company and contact reads, Slack (2 messages), record update, run summary.\nPins apply to **manual executions only**. Unpin a node before a manual live test.",
+        "height": 200,
+        "width": 420,
+        "color": 3
+      },
+      "id": "eb01cbc5-fad8-53ea-b8d1-61659ba2762e",
+      "name": "Pinned Data Notice",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        800,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "5 * * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "677118ce-f5a1-536c-823a-cf7f109b42d4",
+      "name": "Hourly Watchdog Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -580,
+        100
+      ],
+      "notes": "Hourly at :05, Monday–Friday (UTC). Cooldown prevents hourly repeats.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {},
+      "id": "1a393aeb-a83c-54c1-8d88-75555785938b",
+      "name": "Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -580,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d77869a8-d274-5026-a9e4-2751f261dea7",
+              "name": "config.sandboxMode",
+              "value": "={{ String($env.SANDBOX_MODE ?? 'true').trim().toLowerCase() !== 'false' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "8b2ea0cf-e841-5d8a-abd1-9bccc81cdcdc",
+              "name": "config.dryRun",
+              "value": "={{ String($env.DRY_RUN ?? 'true').trim().toLowerCase() !== 'false' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "788fa5f5-d949-559d-a6b5-670c7cad196e",
+              "name": "config.sendSlackAlerts",
+              "value": "={{ !(String($env.SANDBOX_MODE ?? 'true').trim().toLowerCase() !== 'false') && !(String($env.DRY_RUN ?? 'true').trim().toLowerCase() !== 'false') && String($env.SEND_SLACK_ALERTS ?? 'false').trim().toLowerCase() === 'true' && Boolean(String($env.SLACK_PM_WEBHOOK_URL ?? '').trim()) }}",
+              "type": "boolean"
+            },
+            {
+              "id": "bb617f9d-208b-53b6-8891-7c44c147eaa7",
+              "name": "config.criticalChannelEnabled",
+              "value": "={{ Boolean(String($env.SLACK_CRITICAL_WEBHOOK_URL ?? '').trim()) }}",
+              "type": "boolean"
+            },
+            {
+              "id": "b57ecaba-832b-59b6-854b-bf06240a4c84",
+              "name": "config.writeToHubspot",
+              "value": "={{ !(String($env.SANDBOX_MODE ?? 'true').trim().toLowerCase() !== 'false') && !(String($env.DRY_RUN ?? 'true').trim().toLowerCase() !== 'false') && String($env.WRITE_TO_HUBSPOT ?? 'false').trim().toLowerCase() === 'true' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "8857bfd6-2177-5902-9542-cfd71ed77ba3",
+              "name": "config.webhookEnabled",
+              "value": "={{ !(String($env.SANDBOX_MODE ?? 'true').trim().toLowerCase() !== 'false') && !(String($env.DRY_RUN ?? 'true').trim().toLowerCase() !== 'false') && Boolean(String($env.ALERT_WEBHOOK_URL ?? '').trim()) }}",
+              "type": "boolean"
+            },
+            {
+              "id": "bdbe5a27-fe7a-5233-a9ff-cfb628785ba9",
+              "name": "config.notifyOnEveryRun",
+              "value": "={{ String($env.NOTIFY_ON_EVERY_RUN ?? 'false').trim().toLowerCase() === 'true' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "f91fbbe5-508a-53c2-a32e-f01f2108e642",
+              "name": "config.objectType",
+              "value": "={{ (t => /^(\\d+-\\d+|p\\d+_[a-z0-9_]+|[a-z][a-z0-9_]*)$/.test(t) ? t : '2-345001')(String($env.ONBOARDING_OBJECT_TYPE ?? '2-345001').trim()) }}",
+              "type": "string"
+            },
+            {
+              "id": "98d0c5a1-a9f4-518a-a38e-34cb42b9bfc9",
+              "name": "config.taskNameProperty",
+              "value": "={{ (p => /^[a-z][a-z0-9_]{0,99}$/.test(p) ? p : '')(String($env.TASK_NAME_PROPERTY ?? 'task_name').trim().toLowerCase()) }}",
+              "type": "string"
+            },
+            {
+              "id": "cad2c48c-a5d5-533f-b1d6-e1b83bae0dfd",
+              "name": "config.milestoneProperty",
+              "value": "={{ (p => /^[a-z][a-z0-9_]{0,99}$/.test(p) ? p : '')(String($env.MILESTONE_PROPERTY ?? 'milestone').trim().toLowerCase()) }}",
+              "type": "string"
+            },
+            {
+              "id": "8b85fc67-2697-5281-a3e8-81abe5e70ad4",
+              "name": "config.statusProperty",
+              "value": "={{ (p => /^[a-z][a-z0-9_]{0,99}$/.test(p) ? p : '')(String($env.STATUS_PROPERTY ?? 'task_status').trim().toLowerCase()) }}",
+              "type": "string"
+            },
+            {
+              "id": "e027485d-e965-5708-a1e7-5dcce7945b51",
+              "name": "config.criticalPathProperty",
+              "value": "={{ (p => /^[a-z][a-z0-9_]{0,99}$/.test(p) ? p : '')(String($env.CRITICAL_PATH_PROPERTY ?? 'is_critical_path').trim().toLowerCase()) }}",
+              "type": "string"
+            },
+            {
+              "id": "01fb97cf-c7b3-524f-94c9-c301980ec88c",
+              "name": "config.dueDateProperty",
+              "value": "={{ (p => /^[a-z][a-z0-9_]{0,99}$/.test(p) ? p : '')(String($env.DUE_DATE_PROPERTY ?? 'due_date').trim().toLowerCase()) }}",
+              "type": "string"
+            },
+            {
+              "id": "4e06f717-2016-5792-a0a1-e5f0fb4553f9",
+              "name": "config.ownerProperty",
+              "value": "={{ (p => /^[a-z][a-z0-9_]{0,99}$/.test(p) ? p : '')(String($env.OWNER_PROPERTY ?? 'hubspot_owner_id').trim().toLowerCase()) }}",
+              "type": "string"
+            },
+            {
+              "id": "a4a47301-fc1d-5ced-8805-6f97d1a4746c",
+              "name": "config.testFlagProperty",
+              "value": "={{ (p => /^[a-z][a-z0-9_]{0,99}$/.test(p) ? p : '')(String($env.TEST_FLAG_PROPERTY ?? 'is_test_record').trim().toLowerCase()) }}",
+              "type": "string"
+            },
+            {
+              "id": "cf66e140-b5f6-591a-a4b7-df017ddd35d9",
+              "name": "config.onboardingStatusProperty",
+              "value": "={{ (p => /^[a-z][a-z0-9_]{0,99}$/.test(p) ? p : '')(String($env.ONBOARDING_STATUS_PROPERTY ?? 'onboarding_status').trim().toLowerCase()) }}",
+              "type": "string"
+            },
+            {
+              "id": "58d23db4-d662-5b28-85e0-db61c0016bca",
+              "name": "config.lastAlertProperty",
+              "value": "={{ (p => /^[a-z][a-z0-9_]{0,99}$/.test(p) ? p : '')(String($env.LAST_ALERT_PROPERTY ?? 'last_alert_timestamp').trim().toLowerCase()) }}",
+              "type": "string"
+            },
+            {
+              "id": "af543ca2-17e1-5c47-a78e-f9d1682db3aa",
+              "name": "config.lastAlertTierProperty",
+              "value": "={{ (p => /^[a-z][a-z0-9_]{0,99}$/.test(p) ? p : '')(String($env.LAST_ALERT_TIER_PROPERTY ?? 'last_alert_tier').trim().toLowerCase()) }}",
+              "type": "string"
+            },
+            {
+              "id": "e17151ac-b9e1-53a9-a300-9da88e2807f2",
+              "name": "config.companyTierProperty",
+              "value": "={{ (p => /^[a-z][a-z0-9_]{0,99}$/.test(p) ? p : '')(String($env.COMPANY_TIER_PROPERTY ?? 'customer_tier').trim().toLowerCase()) }}",
+              "type": "string"
+            },
+            {
+              "id": "2a23cc9a-3e85-5651-863d-d3537139cb2f",
+              "name": "config.completedStatuses",
+              "value": "={{ String($env.COMPLETED_STATUSES ?? 'completed,done,cancelled,canceled,not_applicable,skipped').split(',').map(x => x.trim()).filter(Boolean) }}",
+              "type": "array"
+            },
+            {
+              "id": "1ac4fcf4-b286-5fe5-a6e2-9b03a532e7cf",
+              "name": "config.inProgressStatuses",
+              "value": "={{ String($env.IN_PROGRESS_STATUSES ?? 'not_started,in_progress,pending').split(',').map(x => x.trim()).filter(Boolean) }}",
+              "type": "array"
+            },
+            {
+              "id": "cf609149-a554-52fa-8c8b-6a9d6bf5e2e2",
+              "name": "config.clientBlockedStatuses",
+              "value": "={{ String($env.CLIENT_BLOCKED_STATUSES ?? 'waiting_on_client,blocked_by_client').split(',').map(x => x.trim()).filter(Boolean) }}",
+              "type": "array"
+            },
+            {
+              "id": "c11c4fdc-bf2a-5e6e-a2d6-fdf186b96138",
+              "name": "config.testNamePatterns",
+              "value": "={{ String($env.TEST_NAME_PATTERNS ?? '[test],test task,qa test,qa only,do not use,dummy').toLowerCase().split(',').map(x => x.trim()).filter(Boolean) }}",
+              "type": "array"
+            },
+            {
+              "id": "b693e7df-62cd-587d-9485-f6c1ee653762",
+              "name": "config.testDomains",
+              "value": "={{ String($env.TEST_DOMAINS ?? '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean) }}",
+              "type": "array"
+            },
+            {
+              "id": "b3907ab3-2bde-50a7-96ac-3efc37e0a664",
+              "name": "config.graceHours",
+              "value": "={{ Math.min(336, Math.max(0, Number.isFinite(parseFloat($env.GRACE_PERIOD_HOURS)) ? parseFloat($env.GRACE_PERIOD_HOURS) : 4)) }}",
+              "type": "number"
+            },
+            {
+              "id": "d223d0f4-87e7-5df2-b0f9-81603bcbc484",
+              "name": "config.highHours",
+              "value": "={{ Math.min(720, Math.max(1, Number.isFinite(parseFloat($env.HIGH_OVERDUE_HOURS)) ? parseFloat($env.HIGH_OVERDUE_HOURS) : 24)) }}",
+              "type": "number"
+            },
+            {
+              "id": "3b912422-61ff-5e79-b036-f66d53030fad",
+              "name": "config.criticalHours",
+              "value": "={{ Math.min(2160, Math.max(1, Number.isFinite(parseFloat($env.CRITICAL_OVERDUE_HOURS)) ? parseFloat($env.CRITICAL_OVERDUE_HOURS) : 72)) }}",
+              "type": "number"
+            },
+            {
+              "id": "fe241c65-bedf-59f0-abcc-40620d3a7bff",
+              "name": "config.dueSoonHours",
+              "value": "={{ Math.min(720, Math.max(0, Number.isFinite(parseFloat($env.DUE_SOON_HOURS)) ? parseFloat($env.DUE_SOON_HOURS) : 24)) }}",
+              "type": "number"
+            },
+            {
+              "id": "d008655f-69dd-5ca3-b6a3-4900885dc1a8",
+              "name": "config.staleUpdateDays",
+              "value": "={{ Math.min(365, Math.max(1, Number.isFinite(parseFloat($env.STALE_UPDATE_DAYS)) ? parseFloat($env.STALE_UPDATE_DAYS) : 7)) }}",
+              "type": "number"
+            },
+            {
+              "id": "8d5d19a1-f458-58ff-9c9d-79e01be96636",
+              "name": "config.excludeWeekends",
+              "value": "={{ String($env.EXCLUDE_WEEKENDS ?? 'false').trim().toLowerCase() === 'true' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "4cca80ea-39b2-571e-b5c9-825b01ba1ef5",
+              "name": "config.alertMinTier",
+              "value": "={{ ['moderate', 'high', 'critical'].includes(String($env.ALERT_MIN_TIER ?? 'moderate').trim().toLowerCase()) ? String($env.ALERT_MIN_TIER ?? 'moderate').trim().toLowerCase() : 'moderate' }}",
+              "type": "string"
+            },
+            {
+              "id": "07f0feb8-804a-572d-bdff-6e33f0adc46f",
+              "name": "config.alertMode",
+              "value": "={{ ['per_pm_digest', 'per_task'].includes(String($env.ALERT_MODE ?? 'per_pm_digest').trim().toLowerCase()) ? String($env.ALERT_MODE ?? 'per_pm_digest').trim().toLowerCase() : 'per_pm_digest' }}",
+              "type": "string"
+            },
+            {
+              "id": "3d3e1b30-e1eb-550a-8749-3c0cb237ed0a",
+              "name": "config.cooldownHours",
+              "value": "={{ Math.min(720, Math.max(0, Number.isFinite(parseFloat($env.COOLDOWN_HOURS)) ? Math.round(parseFloat($env.COOLDOWN_HOURS)) : 24)) }}",
+              "type": "number"
+            },
+            {
+              "id": "223fa777-91a9-57a0-bc7a-910c705142f4",
+              "name": "config.maxTasksPerRun",
+              "value": "={{ Math.min(5000, Math.max(1, Number.isFinite(parseFloat($env.MAX_TASKS_PER_RUN)) ? Math.round(parseFloat($env.MAX_TASKS_PER_RUN)) : 500)) }}",
+              "type": "number"
+            },
+            {
+              "id": "2ebac402-3e72-5641-be48-d90b10339b47",
+              "name": "config.maxAlertsPerRun",
+              "value": "={{ Math.min(500, Math.max(1, Number.isFinite(parseFloat($env.MAX_ALERTS_PER_RUN)) ? Math.round(parseFloat($env.MAX_ALERTS_PER_RUN)) : 100)) }}",
+              "type": "number"
+            },
+            {
+              "id": "b791216e-7970-5c00-925a-7e5064134ae0",
+              "name": "config.pmRouting",
+              "value": "={{ (() => { const t = String($env.PM_ROUTING ?? '').trim(); if (t) { try { const j = JSON.parse(t); if (j && typeof j === 'object' && !Array.isArray(j)) return j; } catch (e) { return { default: { name: 'Onboarding team' }, invalid: true }; } } return (String($env.SANDBOX_MODE ?? 'true').trim().toLowerCase() !== 'false') ? { owners: { \"87000001\": { name: \"PM North (synthetic)\", slack: \"U00000PM1\" }, \"87000002\": { name: \"PM South (synthetic)\", slack: \"U00000PM2\" } }, tiers: { \"Enterprise\": { name: \"Enterprise onboarding lead (synthetic)\", slack: \"U00000PM3\" } }, default: { name: \"Onboarding team (synthetic)\" } } : { default: { name: 'Onboarding team' } }; })() }}",
+              "type": "object"
+            },
+            {
+              "id": "7b16537b-f646-5385-9a73-9d09886ddb54",
+              "name": "config.showClientContact",
+              "value": "={{ String($env.SHOW_CLIENT_CONTACT ?? 'false').trim().toLowerCase() === 'true' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "a4b53d1d-0a60-5770-8b2a-66f0ec522253",
+              "name": "config.portalId",
+              "value": "={{ /^\\d+$/.test(String($env.HUBSPOT_PORTAL_ID ?? '').trim()) ? String($env.HUBSPOT_PORTAL_ID).trim() : '' }}",
+              "type": "string"
+            },
+            {
+              "id": "7f42037c-f7a2-579c-8b7f-acc1be6b0fc9",
+              "name": "config.recordUrlTemplate",
+              "value": "={{ String($env.HUBSPOT_RECORD_URL_TEMPLATE ?? 'https://app.hubspot.com/contacts/{portalId}/record/{objectTypeId}/{recordId}').trim() || 'https://app.hubspot.com/contacts/{portalId}/record/{objectTypeId}/{recordId}' }}",
+              "type": "string"
+            },
+            {
+              "id": "0b3be6e0-f238-5201-a71a-fba02a1dfc56",
+              "name": "config.stalledStatusValue",
+              "value": "={{ String($env.STALLED_STATUS_VALUE ?? 'Stalled').trim() || 'Stalled' }}",
+              "type": "string"
+            },
+            {
+              "id": "00b5229b-9407-5c06-bd1d-ef56988cef68",
+              "name": "config.attentionStatusValue",
+              "value": "={{ String($env.ATTENTION_STATUS_VALUE ?? 'Attention Required').trim() || 'Attention Required' }}",
+              "type": "string"
+            },
+            {
+              "id": "d0177a2c-dc12-5781-a156-050a1d3c8d27",
+              "name": "config.hubspotBaseUrl",
+              "value": "={{ String($env.HUBSPOT_API_BASE_URL ?? 'https://api.hubapi.com').trim().replace(/\\/+$/, '') || 'https://api.hubapi.com' }}",
+              "type": "string"
+            },
+            {
+              "id": "9db9bdfe-c765-59a4-b2cd-eceb1f1de414",
+              "name": "config.runId",
+              "value": "={{ $execution.id }}",
+              "type": "string"
+            },
+            {
+              "id": "4d41f6da-db1b-56a2-b26c-52ef81f11ff2",
+              "name": "config.executionMode",
+              "value": "={{ $execution.mode }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cfef2bcf-9e59-5314-8187-813486d2de1e",
+      "name": "Config & Safety Gate",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -360,
+        200
+      ],
+      "notes": "Typed, non-secret configuration under config.*. Flags record only whether a secret or URL is set.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "7803234f-ebc6-5c32-aabc-619181cb57ef",
+              "leftValue": "={{ $('Config & Safety Gate').first().json.config.sandboxMode }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "19615603-9191-5532-bfe9-87e9f6980022",
+      "name": "Sandbox Mode?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -140,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Mock Onboarding Tasks (SANDBOX_MODE=true)\n// sample-payloads/hubspot-onboarding-tasks.json → the same shape \"Assemble Task\n// Context\" builds on the live path. _relative offsets are resolved against\n// now so every scenario stays stable, and fixture property names are mapped to\n// the configured ones. No HubSpot call.\n// ─────────────────────────────────────────────────────────────────────────────\nconst cfg = $('Config & Safety Gate').first().json.config;\nconst FIXTURE = {\n  \"_comment\": \"Synthetic fixture in the HubSpot custom object search response shape (object type 2-345001 is a placeholder). All companies, people, emails and IDs are fictitious. Dates are given as _relative offsets and resolved against the current time by the sandbox node; _scenario documents the expected result (README \\u00a75).\",\n  \"objectType\": \"2-345001\",\n  \"results\": [\n    {\n      \"id\": \"900201\",\n      \"properties\": {\n        \"hs_object_id\": \"900201\",\n        \"task_name\": \"SSO / SAML configuration\",\n        \"milestone\": \"Technical Setup\",\n        \"task_status\": \"in_progress\",\n        \"is_critical_path\": \"true\",\n        \"due_date\": null,\n        \"hubspot_owner_id\": \"87000001\",\n        \"is_test_record\": \"false\",\n        \"onboarding_status\": \"On Track\",\n        \"last_alert_timestamp\": null,\n        \"last_alert_tier\": null,\n        \"hs_lastmodifieddate\": null\n      },\n      \"companyId\": \"7000101\",\n      \"contactId\": \"9100101\",\n      \"_relative\": {\n        \"dueInHours\": -100,\n        \"modifiedDaysAgo\": 0.5\n      },\n      \"_scenario\": \"critical: critical path, 96h past grace\"\n    },\n    {\n      \"id\": \"900202\",\n      \"properties\": {\n        \"hs_object_id\": \"900202\",\n        \"task_name\": \"Historical order data migration\",\n        \"milestone\": \"Data Migration\",\n        \"task_status\": \"in_progress\",\n        \"is_critical_path\": \"false\",\n        \"due_date\": null,\n        \"hubspot_owner_id\": \"87000001\",\n        \"is_test_record\": \"false\",\n        \"onboarding_status\": \"On Track\",\n        \"last_alert_timestamp\": null,\n        \"last_alert_tier\": null,\n        \"hs_lastmodifieddate\": null\n      },\n      \"companyId\": \"7000101\",\n      \"contactId\": \"9100101\",\n      \"_relative\": {\n        \"dueInHours\": -30,\n        \"modifiedDaysAgo\": 0.5\n      },\n      \"_scenario\": \"high: 26h past grace\"\n    },\n    {\n      \"id\": \"900203\",\n      \"properties\": {\n        \"hs_object_id\": \"900203\",\n        \"task_name\": \"Contact and account import\",\n        \"milestone\": \"Data Migration\",\n        \"task_status\": \"in_progress\",\n        \"is_critical_path\": \"false\",\n        \"due_date\": null,\n        \"hubspot_owner_id\": \"87000002\",\n        \"is_test_record\": \"false\",\n        \"onboarding_status\": \"On Track\",\n        \"last_alert_timestamp\": null,\n        \"last_alert_tier\": null,\n        \"hs_lastmodifieddate\": null\n      },\n      \"companyId\": \"7000102\",\n      \"contactId\": \"9100102\",\n      \"_relative\": {\n        \"dueInHours\": -10,\n        \"modifiedDaysAgo\": 0.5\n      },\n      \"_scenario\": \"moderate: 6h past grace\"\n    },\n    {\n      \"id\": \"900204\",\n      \"properties\": {\n        \"hs_object_id\": \"900204\",\n        \"task_name\": \"API credentials handover\",\n        \"milestone\": \"Technical Setup\",\n        \"task_status\": \"in_progress\",\n        \"is_critical_path\": \"true\",\n        \"due_date\": null,\n        \"hubspot_owner_id\": \"87000002\",\n        \"is_test_record\": \"false\",\n        \"onboarding_status\": \"On Track\",\n        \"last_alert_timestamp\": null,\n        \"last_alert_tier\": null,\n        \"hs_lastmodifieddate\": null\n      },\n      \"companyId\": \"7000102\",\n      \"contactId\": \"9100102\",\n      \"_relative\": {\n        \"dueInHours\": -50,\n        \"modifiedDaysAgo\": 0.5\n      },\n      \"_scenario\": \"high: critical path but under 72h\"\n    },\n    {\n      \"id\": \"900205\",\n      \"properties\": {\n        \"hs_object_id\": \"900205\",\n        \"task_name\": \"Kickoff call\",\n        \"milestone\": \"Kickoff\",\n        \"task_status\": \"in_progress\",\n        \"is_critical_path\": \"false\",\n        \"due_date\": null,\n        \"hubspot_owner_id\": \"87000003\",\n        \"is_test_record\": \"false\",\n        \"onboarding_status\": \"On Track\",\n        \"last_alert_timestamp\": null,\n        \"last_alert_tier\": null,\n        \"hs_lastmodifieddate\": null\n      },\n      \"companyId\": \"7000103\",\n      \"contactId\": \"9100103\",\n      \"_relative\": {\n        \"dueInHours\": -2,\n        \"modifiedDaysAgo\": 0.5\n      },\n      \"_scenario\": \"low: inside 4h grace period\"\n    },\n    {\n      \"id\": \"900206\",\n      \"properties\": {\n        \"hs_object_id\": \"900206\",\n        \"task_name\": \"Admin training session\",\n        \"milestone\": \"Training\",\n        \"task_status\": \"in_progress\",\n        \"is_critical_path\": \"false\",\n        \"due_date\": null,\n        \"hubspot_owner_id\": \"87000003\",\n        \"is_test_record\": \"false\",\n        \"onboarding_status\": \"On Track\",\n        \"last_alert_timestamp\": null,\n        \"last_alert_tier\": null,\n        \"hs_lastmodifieddate\": null\n      },\n      \"companyId\": \"7000103\",\n      \"contactId\": \"9100103\",\n      \"_relative\": {\n        \"dueInHours\": 20,\n        \"modifiedDaysAgo\": 0.5\n      },\n      \"_scenario\": \"low: due within 24h\"\n    },\n    {\n      \"id\": \"900207\",\n      \"properties\": {\n        \"hs_object_id\": \"900207\",\n        \"task_name\": \"Go-live readiness review\",\n        \"milestone\": \"Go-Live\",\n        \"task_status\": \"in_progress\",\n        \"is_critical_path\": \"false\",\n        \"due_date\": null,\n        \"hubspot_owner_id\": \"87000002\",\n        \"is_test_record\": \"false\",\n        \"onboarding_status\": \"On Track\",\n        \"last_alert_timestamp\": null,\n        \"last_alert_tier\": null,\n        \"hs_lastmodifieddate\": null\n      },\n      \"companyId\": \"7000104\",\n      \"contactId\": \"9100104\",\n      \"_relative\": {\n        \"dueInHours\": 200,\n        \"modifiedDaysAgo\": 0.5\n      },\n      \"_scenario\": \"on_track: due in 8 days\"\n    },\n    {\n      \"id\": \"900208\",\n      \"properties\": {\n        \"hs_object_id\": \"900208\",\n        \"task_name\": \"Workspace provisioning\",\n        \"milestone\": \"Technical Setup\",\n        \"task_status\": \"completed\",\n        \"is_critical_path\": \"true\",\n        \"due_date\": null,\n        \"hubspot_owner_id\": \"87000002\",\n        \"is_test_record\": \"false\",\n        \"onboarding_status\": \"On Track\",\n        \"last_alert_timestamp\": null,\n        \"last_alert_tier\": null,\n        \"hs_lastmodifieddate\": null\n      },\n      \"companyId\": \"7000104\",\n      \"contactId\": \"9100104\",\n      \"_relative\": {\n        \"dueInHours\": -80,\n        \"modifiedDaysAgo\": 0.5\n      },\n      \"_scenario\": \"skipped: completed\"\n    },\n    {\n      \"id\": \"900209\",\n      \"properties\": {\n        \"hs_object_id\": \"900209\",\n        \"task_name\": \"[TEST] Sandbox onboarding task\",\n        \"milestone\": \"Technical Setup\",\n        \"task_status\": \"in_progress\",\n        \"is_critical_path\": \"true\",\n        \"due_date\": null,\n        \"hubspot_owner_id\": \"87000001\",\n        \"is_test_record\": \"true\",\n        \"onboarding_status\": \"On Track\",\n        \"last_alert_timestamp\": null,\n        \"last_alert_tier\": null,\n        \"hs_lastmodifieddate\": null\n      },\n      \"companyId\": \"7000101\",\n      \"contactId\": \"9100101\",\n      \"_relative\": {\n        \"dueInHours\": -150,\n        \"modifiedDaysAgo\": 0.5\n      },\n      \"_scenario\": \"skipped: is_test_record\"\n    },\n    {\n      \"id\": \"900210\",\n      \"properties\": {\n        \"hs_object_id\": \"900210\",\n        \"task_name\": \"Data warehouse connector\",\n        \"milestone\": \"Technical Setup\",\n        \"task_status\": \"in_progress\",\n        \"is_critical_path\": \"true\",\n        \"due_date\": null,\n        \"hubspot_owner_id\": \"87000003\",\n        \"is_test_record\": \"false\",\n        \"onboarding_status\": \"On Track\",\n        \"last_alert_timestamp\": null,\n        \"last_alert_tier\": null,\n        \"hs_lastmodifieddate\": null\n      },\n      \"companyId\": \"7000107\",\n      \"contactId\": null,\n      \"_relative\": {\n        \"dueInHours\": -120,\n        \"modifiedDaysAgo\": 0.5\n      },\n      \"_scenario\": \"skipped: test company name\"\n    },\n    {\n      \"id\": \"900211\",\n      \"properties\": {\n        \"hs_object_id\": \"900211\",\n        \"task_name\": \"Integration testing sign-off\",\n        \"milestone\": \"Technical Setup\",\n        \"task_status\": \"in_progress\",\n        \"is_critical_path\": \"true\",\n        \"due_date\": null,\n        \"hubspot_owner_id\": \"87000001\",\n        \"is_test_record\": \"false\",\n        \"onboarding_status\": \"On Track\",\n        \"last_alert_timestamp\": null,\n        \"last_alert_tier\": \"critical\",\n        \"hs_lastmodifieddate\": null\n      },\n      \"companyId\": \"7000105\",\n      \"contactId\": \"9100105\",\n      \"_relative\": {\n        \"dueInHours\": -80,\n        \"modifiedDaysAgo\": 0.5,\n        \"lastAlertHoursAgo\": 3\n      },\n      \"_scenario\": \"suppressed: alerted 3h ago at same tier\"\n    },\n    {\n      \"id\": \"900212\",\n      \"properties\": {\n        \"hs_object_id\": \"900212\",\n        \"task_name\": \"Security questionnaire review\",\n        \"milestone\": \"Compliance\",\n        \"task_status\": \"in_progress\",\n        \"is_critical_path\": \"false\",\n        \"due_date\": null,\n        \"hubspot_owner_id\": \"87000001\",\n        \"is_test_record\": \"false\",\n        \"onboarding_status\": \"On Track\",\n        \"last_alert_timestamp\": null,\n        \"last_alert_tier\": null,\n        \"hs_lastmodifieddate\": null\n      },\n      \"companyId\": \"7000105\",\n      \"contactId\": \"9100105\",\n      \"_relative\": {\n        \"dueInHours\": 72,\n        \"modifiedDaysAgo\": 9\n      },\n      \"_scenario\": \"moderate: no activity for 9 days\"\n    },\n    {\n      \"id\": \"900213\",\n      \"properties\": {\n        \"hs_object_id\": \"900213\",\n        \"task_name\": \"Billing contact confirmation\",\n        \"milestone\": \"Billing Setup\",\n        \"task_status\": \"waiting_on_client\",\n        \"is_critical_path\": \"false\",\n        \"due_date\": null,\n        \"hubspot_owner_id\": \"87000003\",\n        \"is_test_record\": \"false\",\n        \"onboarding_status\": \"On Track\",\n        \"last_alert_timestamp\": null,\n        \"last_alert_tier\": null,\n        \"hs_lastmodifieddate\": null\n      },\n      \"companyId\": \"7000106\",\n      \"contactId\": \"9100106\",\n      \"_relative\": {\n        \"dueInHours\": -200,\n        \"modifiedDaysAgo\": 0.5\n      },\n      \"_scenario\": \"moderate: waiting on client (capped)\"\n    },\n    {\n      \"id\": \"900214\",\n      \"properties\": {\n        \"hs_object_id\": \"900214\",\n        \"task_name\": \"Custom report build\",\n        \"milestone\": \"Reporting\",\n        \"task_status\": \"in_progress\",\n        \"is_critical_path\": \"false\",\n        \"due_date\": null,\n        \"hubspot_owner_id\": \"87000003\",\n        \"is_test_record\": \"false\",\n        \"onboarding_status\": \"On Track\",\n        \"last_alert_timestamp\": null,\n        \"last_alert_tier\": null,\n        \"hs_lastmodifieddate\": null\n      },\n      \"companyId\": \"7000106\",\n      \"contactId\": \"9100106\",\n      \"_relative\": {\n        \"dueInHours\": null,\n        \"modifiedDaysAgo\": 0.5\n      },\n      \"_scenario\": \"skipped: no due date\"\n    },\n    {\n      \"id\": \"900215\",\n      \"properties\": {\n        \"hs_object_id\": \"900215\",\n        \"task_name\": \"Payment gateway sandbox setup\",\n        \"milestone\": \"Technical Setup\",\n        \"task_status\": \"in_progress\",\n        \"is_critical_path\": \"true\",\n        \"due_date\": null,\n        \"hubspot_owner_id\": \"\",\n        \"is_test_record\": \"false\",\n        \"onboarding_status\": \"On Track\",\n        \"last_alert_timestamp\": null,\n        \"last_alert_tier\": null,\n        \"hs_lastmodifieddate\": null\n      },\n      \"companyId\": \"7000104\",\n      \"contactId\": \"9100104\",\n      \"_relative\": {\n        \"dueInHours\": -76.5,\n        \"modifiedDaysAgo\": 0.5\n      },\n      \"_scenario\": \"critical: critical path 72.5h past grace, no owner \\u2192 default PM\"\n    }\n  ],\n  \"companies\": {\n    \"7000101\": {\n      \"id\": \"7000101\",\n      \"properties\": {\n        \"name\": \"Apex Logistics\",\n        \"domain\": \"apexlogistics.example.com\",\n        \"customer_tier\": \"Enterprise\"\n      }\n    },\n    \"7000102\": {\n      \"id\": \"7000102\",\n      \"properties\": {\n        \"name\": \"Vanguard Cloud\",\n        \"domain\": \"vanguardcloud.example.com\",\n        \"customer_tier\": \"Growth\"\n      }\n    },\n    \"7000103\": {\n      \"id\": \"7000103\",\n      \"properties\": {\n        \"name\": \"Orchid Health\",\n        \"domain\": \"orchidhealth.example.com\",\n        \"customer_tier\": \"Mid-Market\"\n      }\n    },\n    \"7000104\": {\n      \"id\": \"7000104\",\n      \"properties\": {\n        \"name\": \"Summit Retail\",\n        \"domain\": \"summitretail.example.com\",\n        \"customer_tier\": \"Growth\"\n      }\n    },\n    \"7000105\": {\n      \"id\": \"7000105\",\n      \"properties\": {\n        \"name\": \"Brightwater Labs\",\n        \"domain\": \"brightwater.example.com\",\n        \"customer_tier\": \"Enterprise\"\n      }\n    },\n    \"7000106\": {\n      \"id\": \"7000106\",\n      \"properties\": {\n        \"name\": \"Northwind Media\",\n        \"domain\": \"northwindmedia.example.com\",\n        \"customer_tier\": \"Mid-Market\"\n      }\n    },\n    \"7000107\": {\n      \"id\": \"7000107\",\n      \"properties\": {\n        \"name\": \"QA Test Account\",\n        \"domain\": \"qa-test.example.com\",\n        \"customer_tier\": \"Internal\"\n      }\n    }\n  },\n  \"contacts\": {\n    \"9100101\": {\n      \"id\": \"9100101\",\n      \"properties\": {\n        \"firstname\": \"Sarah\",\n        \"lastname\": \"Jenkins\",\n        \"email\": \"sarah.jenkins@example.com\"\n      }\n    },\n    \"9100102\": {\n      \"id\": \"9100102\",\n      \"properties\": {\n        \"firstname\": \"Marcus\",\n        \"lastname\": \"Vance\",\n        \"email\": \"marcus.vance@example.com\"\n      }\n    },\n    \"9100103\": {\n      \"id\": \"9100103\",\n      \"properties\": {\n        \"firstname\": \"Priya\",\n        \"lastname\": \"Nair\",\n        \"email\": \"priya.nair@example.com\"\n      }\n    },\n    \"9100104\": {\n      \"id\": \"9100104\",\n      \"properties\": {\n        \"firstname\": \"Diego\",\n        \"lastname\": \"Alvarez\",\n        \"email\": \"diego.alvarez@example.com\"\n      }\n    },\n    \"9100105\": {\n      \"id\": \"9100105\",\n      \"properties\": {\n        \"firstname\": \"Hannah\",\n        \"lastname\": \"Cole\",\n        \"email\": \"hannah.cole@example.com\"\n      }\n    },\n    \"9100106\": {\n      \"id\": \"9100106\",\n      \"properties\": {\n        \"firstname\": \"Tom\",\n        \"lastname\": \"Becker\",\n        \"email\": \"tom.becker@example.com\"\n      }\n    }\n  }\n};\nconst H = 3600000; const now = Date.now();\nconst MAP = { task_name: cfg.taskNameProperty, milestone: cfg.milestoneProperty, task_status: cfg.statusProperty, is_critical_path: cfg.criticalPathProperty, due_date: cfg.dueDateProperty, hubspot_owner_id: cfg.ownerProperty, is_test_record: cfg.testFlagProperty, onboarding_status: cfg.onboardingStatusProperty, last_alert_timestamp: cfg.lastAlertProperty, last_alert_tier: cfg.lastAlertTierProperty };\nconst tasks = FIXTURE.results.slice(0, cfg.maxTasksPerRun).map((r) => {\n  const src = { ...r.properties };\n  const rel = r._relative || {};\n  src.due_date = rel.dueInHours === null || rel.dueInHours === undefined ? null : new Date(now + rel.dueInHours * H).toISOString();\n  src.hs_lastmodifieddate = new Date(now - (rel.modifiedDaysAgo ?? 0.5) * 24 * H).toISOString();\n  if (Number.isFinite(rel.lastAlertHoursAgo)) src.last_alert_timestamp = new Date(now - rel.lastAlertHoursAgo * H).toISOString();\n  const props = { hs_object_id: src.hs_object_id, hs_lastmodifieddate: src.hs_lastmodifieddate };\n  for (const [from, to] of Object.entries(MAP)) if (to) props[to] = src[from];\n  const c = FIXTURE.companies[r.companyId];\n  const p = r.contactId ? FIXTURE.contacts[r.contactId] : null;\n  return {\n    id: r.id, properties: props,\n    company: c ? { id: c.id, name: c.properties.name, domain: c.properties.domain, tier: c.properties[cfg.companyTierProperty] ?? c.properties.customer_tier ?? null } : { id: null, name: null, domain: null, tier: null },\n    contact: p ? { id: p.id, name: `${p.properties.firstname} ${p.properties.lastname}`, email: p.properties.email } : { id: null, name: null, email: null },\n  };\n});\nreturn [{ json: { source: 'fixture', objectType: FIXTURE.objectType, tasks, readErrors: [] } }];\n"
+      },
+      "id": "27c6ef98-8cfe-5a41-9a07-15f91c2782c4",
+      "name": "Mock Onboarding Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        40
+      ],
+      "notes": "sample-payloads/hubspot-onboarding-tasks.json.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Build Search Request\n// POST /crm/v3/objects/{ONBOARDING_OBJECT_TYPE}/search with two OR-ed groups:\n//   A. due date before now − GRACE_PERIOD_HOURS and status not completed\n//   B. status in progress and not modified for STALE_UPDATE_DAYS\n// The due-soon window is not searched: those tasks never alert.\n// ─────────────────────────────────────────────────────────────────────────────\nconst cfg = $('Config & Safety Gate').first().json.config;\nconst now = Date.now();\nconst notDone = cfg.completedStatuses.length ? [{ propertyName: cfg.statusProperty, operator: 'NOT_IN', values: cfg.completedStatuses }] : [];\nconst groups = [{ filters: [{ propertyName: cfg.dueDateProperty, operator: 'LT', value: String(now - cfg.graceHours * 3600000) }, ...notDone] }];\nif (cfg.inProgressStatuses.length) groups.push({ filters: [{ propertyName: cfg.statusProperty, operator: 'IN', values: cfg.inProgressStatuses }, { propertyName: 'hs_lastmodifieddate', operator: 'LT', value: String(now - cfg.staleUpdateDays * 86400000) }] });\nconst properties = [...new Set([cfg.taskNameProperty, cfg.milestoneProperty, cfg.statusProperty, cfg.criticalPathProperty, cfg.dueDateProperty, cfg.ownerProperty, cfg.testFlagProperty, cfg.onboardingStatusProperty, cfg.lastAlertProperty, cfg.lastAlertTierProperty, 'hs_lastmodifieddate'].filter(Boolean))];\nreturn [{ json: { searchBody: { filterGroups: groups, sorts: [{ propertyName: cfg.dueDateProperty, direction: 'ASCENDING' }], properties, limit: 100 }, maxPages: Math.max(1, Math.ceil(cfg.maxTasksPerRun / 100)) } }];\n"
+      },
+      "id": "9076d568-4fd0-5432-a537-83a871e71504",
+      "name": "Build Search Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        340
+      ],
+      "notes": "Overdue-past-grace OR stale in-progress.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config & Safety Gate').first().json.config.hubspotBaseUrl }}/crm/v3/objects/{{ $('Config & Safety Gate').first().json.config.objectType }}/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUBSPOT_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.searchBody) }}",
+        "options": {
+          "timeout": 30000,
+          "pagination": {
+            "pagination": {
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "body",
+                    "name": "after",
+                    "value": "={{ $response.body.paging.next.after }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.paging || !$response.body.paging.next || !$response.body.paging.next.after }}",
+              "limitPagesFetched": true,
+              "maxRequests": "={{ $('Build Search Request').first().json.maxPages }}",
+              "requestInterval": 250
+            }
+          }
+        }
+      },
+      "id": "215da36f-0459-5848-b794-2dadd550df49",
+      "name": "HubSpot: Search Onboarding Tasks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        340
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "Custom object search, 100/page. Scope: crm.objects.custom.read.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Collect Search Pages & Build Reads\n// Flattens the paginated search, caps at MAX_TASKS_PER_RUN and prepares the\n// v4 association reads (task → companies, task → contacts).\n// ─────────────────────────────────────────────────────────────────────────────\nconst cfg = $('Config & Safety Gate').first().json.config;\nconst pages = $input.all().map((i) => i.json);\nif (pages.length === 1 && pages[0].error) throw new Error(`HubSpot custom object search failed: ${JSON.stringify(pages[0].error).slice(0, 300)}. Check ONBOARDING_OBJECT_TYPE and the property names.`);\nconst seen = new Set(); const tasks = [];\nfor (const pg of pages) for (const r of pg.results || []) { if (seen.has(String(r.id)) || tasks.length >= cfg.maxTasksPerRun) continue; seen.add(String(r.id)); tasks.push({ id: String(r.id), properties: r.properties || {} }); }\nconst inputs = (tasks.length ? tasks : [{ id: '0' }]).map((t) => ({ id: t.id }));\nreturn [{ json: { tasks, total: Number(pages[0]?.total) || tasks.length, assocBody: { inputs } } }];\n"
+      },
+      "id": "3f57d4ce-5505-5d9c-9e2d-8426ec0924e1",
+      "name": "Collect Search Pages & Build Reads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config & Safety Gate').first().json.config.hubspotBaseUrl + '/crm/v4/associations/' + $('Config & Safety Gate').first().json.config.objectType + '/companies/batch/read' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUBSPOT_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.assocBody) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "b724cbc1-39a4-5a7c-a6b0-3f19a12c3759",
+      "name": "HubSpot: Task → Company Associations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        740,
+        340
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "notes": "Scope: crm.objects.custom.read.",
+      "notesInFlow": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config & Safety Gate').first().json.config.hubspotBaseUrl + '/crm/v4/associations/' + $('Config & Safety Gate').first().json.config.objectType + '/contacts/batch/read' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUBSPOT_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Collect Search Pages & Build Reads').first().json.assocBody) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "dc4b37ba-ea3a-5ae7-aef1-c72e02bd2f86",
+      "name": "HubSpot: Task → Contact Associations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        340
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "notes": "",
+      "notesInFlow": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Build Company & Contact Reads\n// Primary associated company and contact per task → one batch read each.\n// ─────────────────────────────────────────────────────────────────────────────\nconst cfg = $('Config & Safety Gate').first().json.config;\nconst pick = (resp) => {\n  const map = {};\n  for (const r of resp.results || []) {\n    const to = r.to || [];\n    const primary = to.find((x) => (x.associationTypes || []).some((a) => /primary/i.test(String(a.label || '')))) || to[0];\n    if (primary) map[String(r.from?.id)] = String(primary.toObjectId);\n  }\n  return map;\n};\nconst comp = pick($('HubSpot: Task → Company Associations').first().json || {});\nconst cont = pick($input.first().json || {});\nconst cIds = [...new Set(Object.values(comp))]; const pIds = [...new Set(Object.values(cont))];\nreturn [{ json: { companyByTask: comp, contactByTask: cont,\n  companyBody: { properties: [...new Set(['name', 'domain', cfg.companyTierProperty].filter(Boolean))], inputs: (cIds.length ? cIds : ['0']).map((id) => ({ id })) },\n  contactBody: { properties: ['firstname', 'lastname', 'email'], inputs: (pIds.length ? pIds : ['0']).map((id) => ({ id })) } } }];\n"
+      },
+      "id": "7f09a61d-b23c-5b9f-a649-c9c10787613a",
+      "name": "Build Company & Contact Reads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config & Safety Gate').first().json.config.hubspotBaseUrl }}/crm/v3/objects/companies/batch/read",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUBSPOT_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.companyBody) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "43a974dd-482a-5f0a-afcb-e67786d31739",
+      "name": "HubSpot: Batch Read Companies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1400,
+        340
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "notes": "Client name, domain, tier. Scope: crm.objects.companies.read.",
+      "notesInFlow": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config & Safety Gate').first().json.config.hubspotBaseUrl }}/crm/v3/objects/contacts/batch/read",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUBSPOT_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Build Company & Contact Reads').first().json.contactBody) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "a6f3b67e-fd1e-5189-aba1-c8234523b1b9",
+      "name": "HubSpot: Batch Read Contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1620,
+        340
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "notes": "Client contact. Scope: crm.objects.contacts.read.",
+      "notesInFlow": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Assemble Task Context\n// Task properties + primary company (name, domain, tier) + primary client\n// contact, in the same shape as \"Mock Onboarding Tasks\". Failed reads leave\n// that context empty and are reported.\n// ─────────────────────────────────────────────────────────────────────────────\nconst cfg = $('Config & Safety Gate').first().json.config;\nconst base = $('Collect Search Pages & Build Reads').first().json;\nconst maps = $('Build Company & Contact Reads').first().json;\nconst compResp = $('HubSpot: Batch Read Companies').first().json || {};\nconst contResp = $input.first().json || {};\nconst byId = (resp) => new Map((resp.results || []).map((r) => [String(r.id), r]));\nconst companies = byId(compResp); const contacts = byId(contResp);\nconst readErrors = [];\nfor (const [n, label] of [['HubSpot: Task → Company Associations', 'company_associations'], ['HubSpot: Task → Contact Associations', 'contact_associations']]) { try { if ($(n).first().json.error) readErrors.push(`${label}_failed`); } catch (e) { /* not executed */ } }\nif (compResp.error) readErrors.push('companies_read_failed');\nif (contResp.error) readErrors.push('contacts_read_failed');\nconst tasks = base.tasks.map((t) => {\n  const c = companies.get(maps.companyByTask[t.id] || ''); const p = contacts.get(maps.contactByTask[t.id] || '');\n  return { id: t.id, properties: t.properties,\n    company: c ? { id: String(c.id), name: c.properties?.name || null, domain: c.properties?.domain || null, tier: c.properties?.[cfg.companyTierProperty] ?? null } : { id: null, name: null, domain: null, tier: null },\n    contact: p ? { id: String(p.id), name: [p.properties?.firstname, p.properties?.lastname].filter(Boolean).join(' ') || null, email: p.properties?.email || null } : { id: null, name: null, email: null } };\n});\nreturn [{ json: { source: 'hubspot', objectType: cfg.objectType, tasks, readErrors } }];\n"
+      },
+      "id": "79eecc2b-4cfb-527e-b8ce-69952d6db62a",
+      "name": "Assemble Task Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Stalled Task Analysis & Scoring\n// Per task:\n//  1. Filters: completed / cancelled statuses, internal test records (flag\n//     property, task-name and company-name patterns, test domains), missing\n//     due dates.\n//  2. delay_hours = hours between due date + GRACE_PERIOD_HOURS and now\n//     (calendar hours, or Mon–Fri UTC hours with EXCLUDE_WEEKENDS=true).\n//  3. severity_tier:\n//       critical  critical-path task more than CRITICAL_OVERDUE_HOURS late\n//       high      more than HIGH_OVERDUE_HOURS late (or > critical threshold\n//                 off the critical path)\n//       moderate  overdue past grace, or in progress with no update for\n//                 STALE_UPDATE_DAYS, or waiting on the client (capped here)\n//       low       inside the grace period or due within DUE_SOON_HOURS\n//       on_track  due later\n//  4. is_stalled, should_alert (tier ≥ ALERT_MIN_TIER), PM routing context.\n// ─────────────────────────────────────────────────────────────────────────────\nconst cfg = $('Config & Safety Gate').first().json.config;\nconst { tasks, source, objectType, readErrors } = $input.first().json;\nconst NOW = Date.now(); const H = 3600000;\nconst RANK = { on_track: 0, low: 1, moderate: 2, high: 3, critical: 4 };\nconst truthy = (v) => ['true', 'yes', '1', 'y'].includes(String(v ?? '').trim().toLowerCase());\nconst norm = (v) => String(v ?? '').trim().toLowerCase().replace(/[\\s-]+/g, '_');\n\nfunction parseDate(v) {\n  if (v === null || v === undefined || v === '') return null;\n  if (/^\\d{10,13}$/.test(String(v))) { const n = Number(v); return n < 1e12 ? n * 1000 : n; }\n  // Date-only values (HubSpot date properties) are treated as end of that day UTC.\n  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(String(v))) return Date.parse(`${v}T23:59:59Z`);\n  const t = Date.parse(String(v)); return Number.isFinite(t) ? t : null;\n}\n// Hours between a and b, counting only Monday–Friday (UTC) when configured.\nfunction hoursBetween(a, b) {\n  if (!cfg.excludeWeekends) return (b - a) / H;\n  const sign = b >= a ? 1 : -1; let [x, y] = b >= a ? [a, b] : [b, a]; let ms = 0;\n  while (x < y) {\n    const d = new Date(x); const next = Math.min(y, Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1));\n    const wd = d.getUTCDay(); if (wd !== 0 && wd !== 6) ms += next - x; x = next;\n  }\n  return sign * ms / H;\n}\nconst COMPLETED = cfg.completedStatuses.map(norm); const IN_PROGRESS = cfg.inProgressStatuses.map(norm); const BLOCKED = cfg.clientBlockedStatuses.map(norm);\nconst testName = (s) => cfg.testNamePatterns.some((p) => String(s || '').toLowerCase().includes(p));\nconst isTestDomain = (d) => cfg.testDomains.some((x) => String(d || '').toLowerCase() === x || String(d || '').toLowerCase().endsWith(`.${x}`));\n\nfunction routePm(ownerId, company) {\n  const r = cfg.pmRouting || {};\n  const o = ownerId && r.owners && r.owners[String(ownerId)];\n  if (o) return { ...o, via: 'owner' };\n  const tier = company?.tier && r.tiers && r.tiers[String(company.tier)];\n  if (tier) return { ...tier, via: 'company_tier' };\n  return { ...(r.default || { name: 'Onboarding team' }), via: 'default' };\n}\n\nconst results = tasks.map((t) => {\n  const p = t.properties || {};\n  const name = p[cfg.taskNameProperty] || `Task ${t.id}`;\n  const status = norm(p[cfg.statusProperty]);\n  const due = parseDate(p[cfg.dueDateProperty]);\n  const modified = parseDate(p.hs_lastmodifieddate);\n  const critical = truthy(p[cfg.criticalPathProperty]);\n  const base = { taskId: String(t.id), taskName: name, milestone: p[cfg.milestoneProperty] || null, status: p[cfg.statusProperty] || null, criticalPath: critical,\n    dueDate: due ? new Date(due).toISOString() : null, ownerId: p[cfg.ownerProperty] || null, company: t.company, contact: t.contact, properties: p };\n  const skip = (reason) => ({ ...base, evaluated: false, skipReason: reason, delay_hours: null, severity_tier: null, is_stalled: false, should_alert: false });\n  if (COMPLETED.includes(status)) return skip('completed');\n  if (truthy(p[cfg.testFlagProperty]) || testName(name)) return skip('test_record');\n  if (testName(t.company?.name) || isTestDomain(t.company?.domain)) return skip('test_company');\n  if (!due) return skip('no_due_date');\n\n  const graceEnd = due + cfg.graceHours * H;\n  const delay = hoursBetween(graceEnd, NOW);           // > 0 means overdue past grace\n  const hoursUntilDue = hoursBetween(NOW, due);\n  const daysSinceUpdate = modified ? (NOW - modified) / (24 * H) : null;\n  const waitingOnClient = BLOCKED.includes(status);\n  const staleInProgress = IN_PROGRESS.includes(status) && daysSinceUpdate !== null && daysSinceUpdate >= cfg.staleUpdateDays;\n\n  let tier; let reason;\n  if (delay > 0) {\n    if (critical && delay > cfg.criticalHours) { tier = 'critical'; reason = `critical-path task ${Math.round(delay)}h past due (+${cfg.graceHours}h grace)`; }\n    else if (delay > cfg.highHours) { tier = 'high'; reason = `${Math.round(delay)}h past due${critical ? ' (critical path)' : ''}`; }\n    else { tier = 'moderate'; reason = `${Math.round(delay)}h past due`; }\n    if (waitingOnClient && RANK[tier] > RANK.moderate) { tier = 'moderate'; reason = `waiting on client · ${reason}`; }\n    else if (waitingOnClient) reason = `waiting on client · ${reason}`;\n  } else if (hoursUntilDue <= 0) { tier = 'low'; reason = `inside ${cfg.graceHours}h grace period`; }\n  else if (staleInProgress) { tier = 'moderate'; reason = `no update for ${Math.floor(daysSinceUpdate)} days`; }\n  else if (hoursUntilDue <= cfg.dueSoonHours) { tier = 'low'; reason = `due in ${Math.round(hoursUntilDue)}h`; }\n  else { tier = 'on_track'; reason = `due in ${Math.round(hoursUntilDue / 24)} days`; }\n  if (staleInProgress && delay > 0) reason += ` · no update for ${Math.floor(daysSinceUpdate)} days`;\n\n  const isStalled = delay > 0 || staleInProgress;\n  return {\n    ...base, evaluated: true,\n    delay_hours: delay > 0 ? Math.round(delay * 10) / 10 : 0,\n    days_overdue: delay > 0 ? Math.round((delay / 24) * 10) / 10 : 0,\n    hours_until_due: hoursUntilDue > 0 ? Math.round(hoursUntilDue * 10) / 10 : 0,\n    days_since_update: daysSinceUpdate === null ? null : Math.round(daysSinceUpdate * 10) / 10,\n    severity_tier: tier, reason, is_stalled: isStalled, waiting_on_client: waitingOnClient,\n    should_alert: isStalled && RANK[tier] >= RANK[cfg.alertMinTier],\n    pm: routePm(base.ownerId, t.company),\n    recordUrl: cfg.portalId && cfg.recordUrlTemplate ? cfg.recordUrlTemplate.replace('{portalId}', cfg.portalId).replace('{objectTypeId}', objectType).replace('{recordId}', String(t.id)) : null,\n  };\n});\nconst counts = { tasks: results.length, evaluated: results.filter((r) => r.evaluated).length, skipped: results.filter((r) => !r.evaluated).length, critical: 0, high: 0, moderate: 0, low: 0, on_track: 0, stalled: results.filter((r) => r.is_stalled).length, should_alert: results.filter((r) => r.should_alert).length };\nfor (const r of results) if (r.evaluated) counts[r.severity_tier] += 1;\nreturn [{ json: { source, objectType, readErrors, evaluatedAt: new Date(NOW).toISOString(), counts, results } }];\n"
+      },
+      "id": "a5b90796-08c0-5138-ae09-92ffa058a3b6",
+      "name": "Stalled Task Analysis & Scoring",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2060,
+        180
+      ],
+      "notes": "Filters, delay hours, tier, is_stalled, should_alert, PM routing.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Cooldown Guard\n// Suppresses a repeat alert for the same task within COOLDOWN_HOURS, using\n// the task property LAST_ALERT_PROPERTY (shared, when written back) and\n// workflow static data (production executions). A higher tier than the last\n// alert breaks through. Caps alerts per run at MAX_ALERTS_PER_RUN.\n// ─────────────────────────────────────────────────────────────────────────────\nconst cfg = $('Config & Safety Gate').first().json.config;\nconst a = $input.first().json;\nconst RANK = { on_track: 0, low: 1, moderate: 2, high: 3, critical: 4 };\nlet store = null; try { store = $getWorkflowStaticData('global'); } catch (e) { store = null; }\nconst mem = (store && store.taskAlerts) || {};\nconst now = Date.now();\nconst alerts = []; const suppressed = [];\nconst order = a.results.filter((r) => r.should_alert).sort((x, y) => RANK[y.severity_tier] - RANK[x.severity_tier] || y.delay_hours - x.delay_hours);\nfor (const r of order) {\n  const pAt = Date.parse(r.properties?.[cfg.lastAlertProperty] || '');\n  const pTier = String(r.properties?.[cfg.lastAlertTierProperty] || '').toLowerCase();\n  const m = mem[r.taskId];\n  const last = [Number.isFinite(pAt) ? { at: pAt, tier: pTier || 'moderate', via: 'record_property' } : null, m ? { at: m.at, tier: m.tier, via: 'workflow_memory' } : null].filter(Boolean).sort((x, y) => y.at - x.at)[0];\n  if (last && now - last.at < cfg.cooldownHours * 3600000) {\n    if (RANK[r.severity_tier] > (RANK[last.tier] ?? RANK.moderate)) { alerts.push({ ...r, cooldownBypass: `tier rose from ${last.tier} to ${r.severity_tier}` }); continue; }\n    suppressed.push({ taskId: r.taskId, tier: r.severity_tier, reason: `cooldown (${last.via}, alerted ${Math.round((now - last.at) / 60000)} min ago as ${last.tier})` });\n    continue;\n  }\n  alerts.push({ ...r, cooldownBypass: null });\n}\nfor (const r of alerts.slice(cfg.maxAlertsPerRun)) suppressed.push({ taskId: r.taskId, tier: r.severity_tier, reason: 'over_max_alerts_per_run' });\nreturn [{ json: { ...a, alerts: alerts.slice(0, cfg.maxAlertsPerRun), suppressed } }];\n"
+      },
+      "id": "69f6982f-7c97-56fb-ab85-eae43af26d56",
+      "name": "Cooldown Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2280,
+        180
+      ],
+      "notes": "Per-task cooldown (record property + memory), tier break-through.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Build Slack Watchdog Alerts\n// ALERT_MODE=per_pm_digest (default): one message per PM, tasks grouped by\n// client, worst first. ALERT_MODE=per_task: one message per task.\n// Critical tasks are also sent individually to SLACK_CRITICAL_WEBHOOK_URL\n// when it is set. Each task line: client, task, milestone, days overdue,\n// owner / PM mention, reason and the HubSpot record link.\n// ─────────────────────────────────────────────────────────────────────────────\nconst cfg = $('Config & Safety Gate').first().json.config;\nconst g = $input.first().json;\nconst ICON = { critical: '🔴', high: '🟠', moderate: '🟡', low: '⚪', on_track: '🟢' };\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst pmLabel = (pm) => (pm.slack ? `<@${esc(pm.slack)}>` : esc(pm.name || 'Onboarding team'));\nconst overdue = (r) => (r.delay_hours > 0 ? (r.delay_hours >= 24 ? `${r.days_overdue} days overdue` : `${Math.round(r.delay_hours)}h overdue`) : r.hours_until_due >= 24 ? `due in ${Math.round(r.hours_until_due / 24)} days` : r.hours_until_due > 0 ? `due in ${Math.round(r.hours_until_due)}h` : 'due now');\nconst line = (r) => {\n  const title = r.recordUrl ? `<${r.recordUrl}|${esc(r.taskName)}>` : `*${esc(r.taskName)}*`;\n  return `${ICON[r.severity_tier]} ${title}${r.milestone ? ` · _${esc(r.milestone)}_` : ''}${r.criticalPath ? ' · critical path' : ''}\\n      ${overdue(r)} · due ${esc((r.dueDate || '').slice(0, 10))} · ${esc(r.reason)}${r.cooldownBypass ? ` · ${esc(r.cooldownBypass)}` : ''}`;\n};\nconst messages = [];\nconst header = (text) => ({ type: 'header', text: { type: 'plain_text', text: text.slice(0, 150), emoji: true } });\nif (cfg.alertMode === 'per_task') {\n  for (const r of g.alerts) {\n    messages.push({ channel: 'pm', key: r.taskId, taskIds: [r.taskId], body: { text: `${r.severity_tier.toUpperCase()}: ${r.company?.name || 'Client'} · ${r.taskName} (${overdue(r)})`, blocks: [\n      header(`${ICON[r.severity_tier]} Onboarding ${r.severity_tier}: ${r.company?.name || 'Client'}`),\n      { type: 'section', fields: [\n        { type: 'mrkdwn', text: `*Task*\\n${esc(r.taskName)}` }, { type: 'mrkdwn', text: `*Milestone*\\n${esc(r.milestone || '—')}${r.criticalPath ? ' (critical path)' : ''}` },\n        { type: 'mrkdwn', text: `*Delay*\\n${overdue(r)}` }, { type: 'mrkdwn', text: `*Due*\\n${esc((r.dueDate || '').slice(0, 10))}` },\n        { type: 'mrkdwn', text: `*PM*\\n${pmLabel(r.pm)}` }, { type: 'mrkdwn', text: `*Client tier*\\n${esc(r.company?.tier || '—')}` },\n      ] },\n      { type: 'context', elements: [{ type: 'mrkdwn', text: `${esc(r.reason)}${cfg.showClientContact && r.contact?.name ? ` · client contact ${esc(r.contact.name)}` : ''} · task ${esc(r.taskId)} · run ${esc(cfg.runId)}` }] },\n      ...(r.recordUrl ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open task in HubSpot' }, url: r.recordUrl, ...(r.severity_tier === 'critical' ? { style: 'danger' } : {}) }] }] : []),\n    ] } });\n  }\n} else {\n  const byPm = new Map();\n  for (const r of g.alerts) { const k = r.pm.slack || r.pm.name || 'default'; if (!byPm.has(k)) byPm.set(k, { pm: r.pm, items: [] }); byPm.get(k).items.push(r); }\n  for (const [k, { pm, items }] of byPm) {\n    const worst = items.reduce((w, r) => (['critical', 'high', 'moderate'].indexOf(r.severity_tier) < ['critical', 'high', 'moderate'].indexOf(w) ? r.severity_tier : w), 'moderate');\n    const byClient = new Map();\n    for (const r of items) { const c = r.company?.name || 'Unknown client'; if (!byClient.has(c)) byClient.set(c, []); byClient.get(c).push(r); }\n    const blocks = [header(`${ICON[worst]} Onboarding watchdog: ${items.length} task${items.length === 1 ? '' : 's'} need attention`),\n      { type: 'context', elements: [{ type: 'mrkdwn', text: `For ${pmLabel(pm)} · ${new Date().toISOString().slice(0, 10)} · grace ${cfg.graceHours}h` }] }];\n    for (const [client, rs] of byClient) {\n      const c = rs[0].company || {};\n      blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${esc(client)}*${c.tier ? ` · ${esc(c.tier)}` : ''}${cfg.showClientContact && rs[0].contact?.name ? ` · contact ${esc(rs[0].contact.name)}` : ''}\\n${rs.map(line).join('\\n')}`.slice(0, 2900) } });\n    }\n    blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `run ${esc(cfg.runId)}${g.suppressed.length ? ` · ${g.suppressed.length} repeat alert(s) suppressed by cooldown` : ''}` }] });\n    messages.push({ channel: 'pm', key: k, taskIds: items.map((r) => r.taskId), body: { text: `Onboarding watchdog: ${items.length} stalled task(s) for ${pm.name || 'the onboarding team'}`, blocks: blocks.slice(0, 50) } });\n  }\n}\nif (cfg.criticalChannelEnabled) {\n  for (const r of g.alerts.filter((x) => x.severity_tier === 'critical')) {\n    messages.push({ channel: 'critical', key: `critical-${r.taskId}`, taskIds: [r.taskId], body: { text: `CRITICAL onboarding delay: ${r.company?.name || 'Client'} · ${r.taskName}`, blocks: [\n      header(`🔴 Critical-path delay: ${r.company?.name || 'Client'}`),\n      { type: 'section', text: { type: 'mrkdwn', text: `${line(r)}\\nPM: ${pmLabel(r.pm)}` } },\n      ...(r.recordUrl ? [{ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open task in HubSpot' }, url: r.recordUrl, style: 'danger' }] }] : []),\n    ] } });\n  }\n}\nreturn [{ json: { ...g, messages, slackAllowed: cfg.sendSlackAlerts && messages.length > 0 } }];\n"
+      },
+      "id": "61d822e5-5065-5ea8-a4f5-363f8163bd2b",
+      "name": "Build Slack Watchdog Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2500,
+        180
+      ],
+      "notes": "PM digest or per-task Block Kit, + critical channel.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "f788e284-0068-5c35-a350-6499c44b2789",
+              "leftValue": "={{ $json.slackAllowed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6709fb62-5ace-5d7e-877a-15c5cde08cbd",
+      "name": "Slack Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2720,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One item per Slack message.\nreturn $('Build Slack Watchdog Alerts').first().json.messages.map((m) => ({ json: m }));\n"
+      },
+      "id": "45ad7431-fa42-5ee8-90d7-ef037720c287",
+      "name": "Emit Slack Messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2940,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.channel === 'critical' ? $env.SLACK_CRITICAL_WEBHOOK_URL : $env.SLACK_PM_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1100
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "92decf61-fcd4-5a43-ace4-40bd4ecaf964",
+      "name": "Slack: Post Watchdog Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3160,
+        80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "notes": "Slack incoming webhooks (PM channel; critical channel if set).",
+      "notesInFlow": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Collect Slack Results\n// A task counts as notified when the PM message containing it was accepted.\n// Notified tasks are remembered (production executions) for the cooldown.\n// ─────────────────────────────────────────────────────────────────────────────\nconst cfg = $('Config & Safety Gate').first().json.config;\nconst msgs = $('Emit Slack Messages').all();\nconst resp = $input.all();\nif (resp.length !== msgs.length) throw new Error(`Slack result mismatch: ${msgs.length} messages vs ${resp.length} responses.`);\nconst results = msgs.map((m, i) => ({ key: m.json.key, channel: m.json.channel, taskIds: m.json.taskIds, ok: !resp[i].json.error, error: resp[i].json.error ? String(resp[i].json.error.message || resp[i].json.error).slice(0, 200) : null }));\nconst notified = [...new Set(results.filter((r) => r.ok && r.channel === 'pm').flatMap((r) => r.taskIds))];\nconst tiers = Object.fromEntries($('Build Slack Watchdog Alerts').first().json.alerts.map((a) => [a.taskId, a.severity_tier]));\nlet store = null; try { store = $getWorkflowStaticData('global'); } catch (e) { store = null; }\nif (store && cfg.executionMode === 'production') {\n  store.taskAlerts = store.taskAlerts || {};\n  for (const id of notified) store.taskAlerts[id] = { at: Date.now(), tier: tiers[id] };\n  for (const [k, v] of Object.entries(store.taskAlerts)) if (Date.now() - v.at > 30 * 86400000) delete store.taskAlerts[k];\n}\nreturn [{ json: { results, notified, sent: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length } }];\n"
+      },
+      "id": "e21e14e3-6260-522f-88bc-42c8944d1c2e",
+      "name": "Collect Slack Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3380,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Build Task Updates\n// For alerted tasks that were delivered (or all alerted tasks when Slack is\n// not enabled — flag-only mode): ONBOARDING_STATUS_PROPERTY ← STALLED_STATUS_VALUE\n// (critical/high) or ATTENTION_STATUS_VALUE (moderate), LAST_ALERT_PROPERTY ←\n// now, LAST_ALERT_TIER_PROPERTY ← tier. Values already set are not resent.\n// Batches of ≤ 100 for /crm/v3/objects/{type}/batch/update.\n// ─────────────────────────────────────────────────────────────────────────────\nconst cfg = $('Config & Safety Gate').first().json.config;\nconst g = $('Build Slack Watchdog Alerts').first().json;\nlet sl = null; try { sl = $('Collect Slack Results').isExecuted ? $('Collect Slack Results').first().json : null; } catch (e) { sl = null; }\nconst delivered = new Set(sl ? sl.notified : []);\nconst now = new Date().toISOString();\nconst updates = [];\nfor (const r of g.alerts) {\n  if (cfg.sendSlackAlerts && !delivered.has(r.taskId)) continue;\n  const props = {};\n  const status = ['critical', 'high'].includes(r.severity_tier) ? cfg.stalledStatusValue : cfg.attentionStatusValue;\n  if (cfg.onboardingStatusProperty && status && r.properties?.[cfg.onboardingStatusProperty] !== status) props[cfg.onboardingStatusProperty] = status;\n  if (cfg.lastAlertProperty) props[cfg.lastAlertProperty] = now;\n  if (cfg.lastAlertTierProperty) props[cfg.lastAlertTierProperty] = r.severity_tier;\n  if (Object.keys(props).length) updates.push({ id: r.taskId, properties: props });\n}\nconst batches = [];\nfor (let i = 0; i < updates.length; i += 100) batches.push({ batchNo: batches.length + 1, body: { inputs: updates.slice(i, i + 100) } });\nreturn [{ json: { updates, batches, writeAllowed: cfg.writeToHubspot && batches.length > 0 } }];\n"
+      },
+      "id": "0f1711f9-12a1-53d0-ae65-986d8abd9336",
+      "name": "Build Task Updates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3600,
+        180
+      ],
+      "notes": "onboarding_status + last_alert_timestamp for notified tasks.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "049cf365-707a-5002-b4f2-e0ade65f9f01",
+              "leftValue": "={{ $json.writeAllowed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cddebef3-2dbd-5cd6-9026-2dea3442507a",
+      "name": "Write Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3820,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One item per batch/update request.\nreturn $('Build Task Updates').first().json.batches.map((b) => ({ json: b }));\n"
+      },
+      "id": "9d18875c-daf4-5cdc-b7a4-83093deeee46",
+      "name": "Emit Update Batches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4040,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config & Safety Gate').first().json.config.hubspotBaseUrl + '/crm/v3/objects/' + $('Config & Safety Gate').first().json.config.objectType + '/batch/update' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUBSPOT_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "abc291a8-114e-5f1a-866e-9587d344d01b",
+      "name": "HubSpot: Update Task Records",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4260,
+        80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "notes": "Scope: crm.objects.custom.write.",
+      "notesInFlow": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Build Run Summary\n// One JSON document for ALERT_WEBHOOK_URL (PSA tool, BI, incident tooling):\n// counts, alerted and suppressed tasks, delivery results. No contact data.\n// ─────────────────────────────────────────────────────────────────────────────\nconst cfg = $('Config & Safety Gate').first().json.config;\nconst g = $('Build Slack Watchdog Alerts').first().json;\nlet sl = null; try { sl = $('Collect Slack Results').isExecuted ? $('Collect Slack Results').first().json : null; } catch (e) { sl = null; }\nconst body = {\n  event: 'hubspot.onboarding_watchdog.run', runId: cfg.runId, generatedAt: new Date().toISOString(),\n  mode: cfg.sandboxMode ? 'sandbox' : cfg.sendSlackAlerts ? 'live' : 'dry_run', objectType: g.objectType, counts: g.counts,\n  alerts: g.alerts.map((a) => ({ task_id: a.taskId, company: a.company?.name || null, task: a.taskName, milestone: a.milestone, tier: a.severity_tier, delay_hours: a.delay_hours, critical_path: a.criticalPath, waiting_on_client: a.waiting_on_client, pm: a.pm?.name || null })),\n  suppressed: g.suppressed, slack: sl ? { sent: sl.sent, failed: sl.failed } : null,\n};\nreturn [{ json: { body, sendAllowed: cfg.webhookEnabled && (g.alerts.length > 0 || (sl && sl.failed > 0) || cfg.notifyOnEveryRun) } }];\n"
+      },
+      "id": "ccd46ba0-f8f8-5f42-9616-64c480637c85",
+      "name": "Build Run Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4480,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cc31181c-b38c-5a1f-b3ff-6bed169f139c",
+              "leftValue": "={{ $json.sendAllowed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3a7b4f58-c3fb-555e-bc36-35568aaf7e62",
+      "name": "Summary Webhook?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4700,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ALERT_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.ALERT_WEBHOOK_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "72eb505a-2d75-5bb7-b797-92a45dfc14ab",
+      "name": "Webhook: Post Run Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4920,
+        80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "notes": "Generic JSON webhook.",
+      "notesInFlow": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Execution Summary & Audit\n// Final record on every path: per-task tier, delay and reason, skips,\n// suppressions, Slack and HubSpot results. Contact data is excluded.\n// ─────────────────────────────────────────────────────────────────────────────\nconst cfg = $('Config & Safety Gate').first().json.config;\nconst one = (n) => { try { return $(n).isExecuted ? $(n).first().json : null; } catch (e) { return null; } };\nconst all = (n) => { try { return $(n).isExecuted ? $(n).all().map((i) => i.json) : []; } catch (e) { return []; } };\nconst an = one('Build Slack Watchdog Alerts') || one('Cooldown Guard') || one('Stalled Task Analysis & Scoring');\nconst sl = one('Collect Slack Results');\nconst up = one('Build Task Updates');\nconst hu = all('HubSpot: Update Task Records');\nconst wh = all('Webhook: Post Run Summary');\nlet outcome = 'no_tasks';\nif (an) {\n  if (!an.counts.evaluated) outcome = 'no_tasks_to_evaluate';\n  else if (!an.alerts || !an.alerts.length) outcome = an.counts.should_alert ? 'alerts_suppressed' : 'no_stalled_tasks';\n  else if (cfg.sandboxMode) outcome = 'alerts_found_sandbox';\n  else if (!cfg.sendSlackAlerts) outcome = cfg.dryRun ? 'alerts_found_dry_run' : 'alerts_found_slack_disabled';\n  else if (sl && sl.failed) outcome = sl.notified.length ? 'alerted_partially' : 'alert_failed';\n  else outcome = 'alerted';\n}\nconst status = (list) => (!list.length ? 'not_sent' : list.some((x) => x.error) ? 'failed' : 'sent');\nreturn [{ json: {\n  workflow: 'n8n-hubspot-onboarding-milestone-stalled-task-alerter',\n  runId: cfg.runId, executionMode: cfg.executionMode, finishedAt: new Date().toISOString(), outcome,\n  safety: { sandboxMode: cfg.sandboxMode, dryRun: cfg.dryRun, sendSlackAlerts: cfg.sendSlackAlerts, writeToHubspot: cfg.writeToHubspot },\n  thresholds: { graceHours: cfg.graceHours, highHours: cfg.highHours, criticalHours: cfg.criticalHours, staleUpdateDays: cfg.staleUpdateDays, alertMinTier: cfg.alertMinTier, cooldownHours: cfg.cooldownHours, excludeWeekends: cfg.excludeWeekends },\n  source: an ? an.source : null, objectType: an ? an.objectType : cfg.objectType, readErrors: an ? an.readErrors : [],\n  counts: an ? an.counts : null,\n  tasks: an ? an.results.map((r) => ({ taskId: r.taskId, company: r.company?.name || null, task: r.taskName, milestone: r.milestone, evaluated: r.evaluated, skipReason: r.skipReason || null, tier: r.severity_tier, delayHours: r.delay_hours, stalled: r.is_stalled, shouldAlert: r.should_alert, reason: r.reason || null, pm: r.pm ? (r.pm.name || r.pm.slack) : null })) : [],\n  alerted: an && an.alerts ? an.alerts.map((a) => a.taskId) : [],\n  suppressed: an && an.suppressed ? an.suppressed : [],\n  slack: sl ? sl.results.map((r) => ({ key: r.key, channel: r.channel, tasks: r.taskIds.length, ok: r.ok, error: r.error })) : [],\n  hubspot: { updatesPrepared: up ? up.updates.length : 0, batches: hu.length, status: status(hu), updated: hu.reduce((n, x) => n + (Array.isArray(x.results) ? x.results.length : 0), 0) },\n  runSummaryWebhook: status(wh),\n} }];\n"
+      },
+      "id": "f129e161-e633-5593-a999-7996dde15f5c",
+      "name": "Execution Summary & Audit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5140,
+        300
+      ],
+      "notes": "Final record on every path.",
+      "notesInFlow": false
+    }
+  ],
+  "connections": {
+    "Hourly Watchdog Schedule": {
+      "main": [
+        [
+          {
+            "node": "Config & Safety Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "Config & Safety Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config & Safety Gate": {
+      "main": [
+        [
+          {
+            "node": "Sandbox Mode?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sandbox Mode?": {
+      "main": [
+        [
+          {
+            "node": "Mock Onboarding Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Search Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mock Onboarding Tasks": {
+      "main": [
+        [
+          {
+            "node": "Stalled Task Analysis & Scoring",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Search Request": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: Search Onboarding Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: Search Onboarding Tasks": {
+      "main": [
+        [
+          {
+            "node": "Collect Search Pages & Build Reads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Search Pages & Build Reads": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: Task → Company Associations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: Task → Company Associations": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: Task → Contact Associations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: Task → Contact Associations": {
+      "main": [
+        [
+          {
+            "node": "Build Company & Contact Reads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Company & Contact Reads": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: Batch Read Companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: Batch Read Companies": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: Batch Read Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: Batch Read Contacts": {
+      "main": [
+        [
+          {
+            "node": "Assemble Task Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Task Context": {
+      "main": [
+        [
+          {
+            "node": "Stalled Task Analysis & Scoring",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stalled Task Analysis & Scoring": {
+      "main": [
+        [
+          {
+            "node": "Cooldown Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cooldown Guard": {
+      "main": [
+        [
+          {
+            "node": "Build Slack Watchdog Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Slack Watchdog Alerts": {
+      "main": [
+        [
+          {
+            "node": "Slack Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Gate": {
+      "main": [
+        [
+          {
+            "node": "Emit Slack Messages",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Task Updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit Slack Messages": {
+      "main": [
+        [
+          {
+            "node": "Slack: Post Watchdog Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: Post Watchdog Alert": {
+      "main": [
+        [
+          {
+            "node": "Collect Slack Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Slack Results": {
+      "main": [
+        [
+          {
+            "node": "Build Task Updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Task Updates": {
+      "main": [
+        [
+          {
+            "node": "Write Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Gate": {
+      "main": [
+        [
+          {
+            "node": "Emit Update Batches",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Run Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emit Update Batches": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: Update Task Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: Update Task Records": {
+      "main": [
+        [
+          {
+            "node": "Build Run Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Run Summary": {
+      "main": [
+        [
+          {
+            "node": "Summary Webhook?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary Webhook?": {
+      "main": [
+        [
+          {
+            "node": "Webhook: Post Run Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execution Summary & Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: Post Run Summary": {
+      "main": [
+        [
+          {
+            "node": "Execution Summary & Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "HubSpot: Search Onboarding Tasks": [
+      {
+        "json": {
+          "total": 15,
+          "results": [
+            {
+              "id": "900201",
+              "properties": {
+                "hs_object_id": "900201",
+                "hs_lastmodifieddate": "2026-11-16T04:05:09.418Z",
+                "task_name": "SSO / SAML configuration",
+                "milestone": "Technical Setup",
+                "task_status": "in_progress",
+                "is_critical_path": "true",
+                "due_date": "2026-11-12T12:05:09.418Z",
+                "hubspot_owner_id": "87000001",
+                "is_test_record": "false",
+                "onboarding_status": "On Track",
+                "last_alert_timestamp": null,
+                "last_alert_tier": null
+              },
+              "createdAt": "2026-10-01T09:00:00.000Z",
+              "updatedAt": "2026-11-16T04:05:09.418Z",
+              "archived": false
+            },
+            {
+              "id": "900202",
+              "properties": {
+                "hs_object_id": "900202",
+                "hs_lastmodifieddate": "2026-11-16T04:05:09.418Z",
+                "task_name": "Historical order data migration",
+                "milestone": "Data Migration",
+                "task_status": "in_progress",
+                "is_critical_path": "false",
+                "due_date": "2026-11-15T10:05:09.418Z",
+                "hubspot_owner_id": "87000001",
+                "is_test_record": "false",
+                "onboarding_status": "On Track",
+                "last_alert_timestamp": null,
+                "last_alert_tier": null
+              },
+              "createdAt": "2026-10-01T09:00:00.000Z",
+              "updatedAt": "2026-11-16T04:05:09.418Z",
+              "archived": false
+            },
+            {
+              "id": "900203",
+              "properties": {
+                "hs_object_id": "900203",
+                "hs_lastmodifieddate": "2026-11-16T04:05:09.418Z",
+                "task_name": "Contact and account import",
+                "milestone": "Data Migration",
+                "task_status": "in_progress",
+                "is_critical_path": "false",
+                "due_date": "2026-11-16T06:05:09.418Z",
+                "hubspot_owner_id": "87000002",
+                "is_test_record": "false",
+                "onboarding_status": "On Track",
+                "last_alert_timestamp": null,
+                "last_alert_tier": null
+              },
+              "createdAt": "2026-10-01T09:00:00.000Z",
+              "updatedAt": "2026-11-16T04:05:09.418Z",
+              "archived": false
+            },
+            {
+              "id": "900204",
+              "properties": {
+                "hs_object_id": "900204",
+                "hs_lastmodifieddate": "2026-11-16T04:05:09.418Z",
+                "task_name": "API credentials handover",
+                "milestone": "Technical Setup",
+                "task_status": "in_progress",
+                "is_critical_path": "true",
+                "due_date": "2026-11-14T14:05:09.418Z",
+                "hubspot_owner_id": "87000002",
+                "is_test_record": "false",
+                "onboarding_status": "On Track",
+                "last_alert_timestamp": null,
+                "last_alert_tier": null
+              },
+              "createdAt": "2026-10-01T09:00:00.000Z",
+              "updatedAt": "2026-11-16T04:05:09.418Z",
+              "archived": false
+            },
+            {
+              "id": "900205",
+              "properties": {
+                "hs_object_id": "900205",
+                "hs_lastmodifieddate": "2026-11-16T04:05:09.418Z",
+                "task_name": "Kickoff call",
+                "milestone": "Kickoff",
+                "task_status": "in_progress",
+                "is_critical_path": "false",
+                "due_date": "2026-11-16T14:05:09.418Z",
+                "hubspot_owner_id": "87000003",
+                "is_test_record": "false",
+                "onboarding_status": "On Track",
+                "last_alert_timestamp": null,
+                "last_alert_tier": null
+              },
+              "createdAt": "2026-10-01T09:00:00.000Z",
+              "updatedAt": "2026-11-16T04:05:09.418Z",
+              "archived": false
+            },
+            {
+              "id": "900206",
+              "properties": {
+                "hs_object_id": "900206",
+                "hs_lastmodifieddate": "2026-11-16T04:05:09.418Z",
+                "task_name": "Admin training session",
+                "milestone": "Training",
+                "task_status": "in_progress",
+                "is_critical_path": "false",
+                "due_date": "2026-11-17T12:05:09.418Z",
+                "hubspot_owner_id": "87000003",
+                "is_test_record": "false",
+                "onboarding_status": "On Track",
+                "last_alert_timestamp": null,
+                "last_alert_tier": null
+              },
+              "createdAt": "2026-10-01T09:00:00.000Z",
+              "updatedAt": "2026-11-16T04:05:09.418Z",
+              "archived": false
+            },
+            {
+              "id": "900207",
+              "properties": {
+                "hs_object_id": "900207",
+                "hs_lastmodifieddate": "2026-11-16T04:05:09.418Z",
+                "task_name": "Go-live readiness review",
+                "milestone": "Go-Live",
+                "task_status": "in_progress",
+                "is_critical_path": "false",
+                "due_date": "2026-11-25T00:05:09.418Z",
+                "hubspot_owner_id": "87000002",
+                "is_test_record": "false",
+                "onboarding_status": "On Track",
+                "last_alert_timestamp": null,
+                "last_alert_tier": null
+              },
+              "createdAt": "2026-10-01T09:00:00.000Z",
+              "updatedAt": "2026-11-16T04:05:09.418Z",
+              "archived": false
+            },
+            {
+              "id": "900208",
+              "properties": {
+                "hs_object_id": "900208",
+                "hs_lastmodifieddate": "2026-11-16T04:05:09.418Z",
+                "task_name": "Workspace provisioning",
+                "milestone": "Technical Setup",
+                "task_status": "completed",
+                "is_critical_path": "true",
+                "due_date": "2026-11-13T08:05:09.418Z",
+                "hubspot_owner_id": "87000002",
+                "is_test_record": "false",
+                "onboarding_status": "On Track",
+                "last_alert_timestamp": null,
+                "last_alert_tier": null
+              },
+              "createdAt": "2026-10-01T09:00:00.000Z",
+              "updatedAt": "2026-11-16T04:05:09.418Z",
+              "archived": false
+            },
+            {
+              "id": "900209",
+              "properties": {
+                "hs_object_id": "900209",
+                "hs_lastmodifieddate": "2026-11-16T04:05:09.418Z",
+                "task_name": "[TEST] Sandbox onboarding task",
+                "milestone": "Technical Setup",
+                "task_status": "in_progress",
+                "is_critical_path": "true",
+                "due_date": "2026-11-10T10:05:09.418Z",
+                "hubspot_owner_id": "87000001",
+                "is_test_record": "true",
+                "onboarding_status": "On Track",
+                "last_alert_timestamp": null,
+                "last_alert_tier": null
+              },
+              "createdAt": "2026-10-01T09:00:00.000Z",
+              "updatedAt": "2026-11-16T04:05:09.418Z",
+              "archived": false
+            },
+            {
+              "id": "900210",
+              "properties": {
+                "hs_object_id": "900210",
+                "hs_lastmodifieddate": "2026-11-16T04:05:09.418Z",
+                "task_name": "Data warehouse connector",
+                "milestone": "Technical Setup",
+                "task_status": "in_progress",
+                "is_critical_path": "true",
+                "due_date": "2026-11-11T16:05:09.418Z",
+                "hubspot_owner_id": "87000003",
+                "is_test_record": "false",
+                "onboarding_status": "On Track",
+                "last_alert_timestamp": null,
+                "last_alert_tier": null
+              },
+              "createdAt": "2026-10-01T09:00:00.000Z",
+              "updatedAt": "2026-11-16T04:05:09.418Z",
+              "archived": false
+            },
+            {
+              "id": "900211",
+              "properties": {
+                "hs_object_id": "900211",
+                "hs_lastmodifieddate": "2026-11-16T04:05:09.418Z",
+                "task_name": "Integration testing sign-off",
+                "milestone": "Technical Setup",
+                "task_status": "in_progress",
+                "is_critical_path": "true",
+                "due_date": "2026-11-13T08:05:09.418Z",
+                "hubspot_owner_id": "87000001",
+                "is_test_record": "false",
+                "onboarding_status": "On Track",
+                "last_alert_timestamp": "2026-11-16T13:05:09.418Z",
+                "last_alert_tier": "critical"
+              },
+              "createdAt": "2026-10-01T09:00:00.000Z",
+              "updatedAt": "2026-11-16T04:05:09.418Z",
+              "archived": false
+            },
+            {
+              "id": "900212",
+              "properties": {
+                "hs_object_id": "900212",
+                "hs_lastmodifieddate": "2026-11-07T16:05:09.418Z",
+                "task_name": "Security questionnaire review",
+                "milestone": "Compliance",
+                "task_status": "in_progress",
+                "is_critical_path": "false",
+                "due_date": "2026-11-19T16:05:09.418Z",
+                "hubspot_owner_id": "87000001",
+                "is_test_record": "false",
+                "onboarding_status": "On Track",
+                "last_alert_timestamp": null,
+                "last_alert_tier": null
+              },
+              "createdAt": "2026-10-01T09:00:00.000Z",
+              "updatedAt": "2026-11-07T16:05:09.418Z",
+              "archived": false
+            },
+            {
+              "id": "900213",
+              "properties": {
+                "hs_object_id": "900213",
+                "hs_lastmodifieddate": "2026-11-16T04:05:09.418Z",
+                "task_name": "Billing contact confirmation",
+                "milestone": "Billing Setup",
+                "task_status": "waiting_on_client",
+                "is_critical_path": "false",
+                "due_date": "2026-11-08T08:05:09.418Z",
+                "hubspot_owner_id": "87000003",
+                "is_test_record": "false",
+                "onboarding_status": "On Track",
+                "last_alert_timestamp": null,
+                "last_alert_tier": null
+              },
+              "createdAt": "2026-10-01T09:00:00.000Z",
+              "updatedAt": "2026-11-16T04:05:09.418Z",
+              "archived": false
+            },
+            {
+              "id": "900214",
+              "properties": {
+                "hs_object_id": "900214",
+                "hs_lastmodifieddate": "2026-11-16T04:05:09.418Z",
+                "task_name": "Custom report build",
+                "milestone": "Reporting",
+                "task_status": "in_progress",
+                "is_critical_path": "false",
+                "due_date": null,
+                "hubspot_owner_id": "87000003",
+                "is_test_record": "false",
+                "onboarding_status": "On Track",
+                "last_alert_timestamp": null,
+                "last_alert_tier": null
+              },
+              "createdAt": "2026-10-01T09:00:00.000Z",
+              "updatedAt": "2026-11-16T04:05:09.418Z",
+              "archived": false
+            },
+            {
+              "id": "900215",
+              "properties": {
+                "hs_object_id": "900215",
+                "hs_lastmodifieddate": "2026-11-16T04:05:09.418Z",
+                "task_name": "Payment gateway sandbox setup",
+                "milestone": "Technical Setup",
+                "task_status": "in_progress",
+                "is_critical_path": "true",
+                "due_date": "2026-11-13T11:35:09.418Z",
+                "hubspot_owner_id": "",
+                "is_test_record": "false",
+                "onboarding_status": "On Track",
+                "last_alert_timestamp": null,
+                "last_alert_tier": null
+              },
+              "createdAt": "2026-10-01T09:00:00.000Z",
+              "updatedAt": "2026-11-16T04:05:09.418Z",
+              "archived": false
+            }
+          ]
+        }
+      }
+    ],
+    "HubSpot: Task → Company Associations": [
+      {
+        "json": {
+          "status": "COMPLETE",
+          "results": [
+            {
+              "from": {
+                "id": "900201"
+              },
+              "to": [
+                {
+                  "toObjectId": 7000101,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 101,
+                      "label": "Primary"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900202"
+              },
+              "to": [
+                {
+                  "toObjectId": 7000101,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 101,
+                      "label": "Primary"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900203"
+              },
+              "to": [
+                {
+                  "toObjectId": 7000102,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 101,
+                      "label": "Primary"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900204"
+              },
+              "to": [
+                {
+                  "toObjectId": 7000102,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 101,
+                      "label": "Primary"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900205"
+              },
+              "to": [
+                {
+                  "toObjectId": 7000103,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 101,
+                      "label": "Primary"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900206"
+              },
+              "to": [
+                {
+                  "toObjectId": 7000103,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 101,
+                      "label": "Primary"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900207"
+              },
+              "to": [
+                {
+                  "toObjectId": 7000104,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 101,
+                      "label": "Primary"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900208"
+              },
+              "to": [
+                {
+                  "toObjectId": 7000104,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 101,
+                      "label": "Primary"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900209"
+              },
+              "to": [
+                {
+                  "toObjectId": 7000101,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 101,
+                      "label": "Primary"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900210"
+              },
+              "to": [
+                {
+                  "toObjectId": 7000107,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 101,
+                      "label": "Primary"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900211"
+              },
+              "to": [
+                {
+                  "toObjectId": 7000105,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 101,
+                      "label": "Primary"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900212"
+              },
+              "to": [
+                {
+                  "toObjectId": 7000105,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 101,
+                      "label": "Primary"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900213"
+              },
+              "to": [
+                {
+                  "toObjectId": 7000106,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 101,
+                      "label": "Primary"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900214"
+              },
+              "to": [
+                {
+                  "toObjectId": 7000106,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 101,
+                      "label": "Primary"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900215"
+              },
+              "to": [
+                {
+                  "toObjectId": 7000104,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 101,
+                      "label": "Primary"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "HubSpot: Task → Contact Associations": [
+      {
+        "json": {
+          "status": "COMPLETE",
+          "results": [
+            {
+              "from": {
+                "id": "900201"
+              },
+              "to": [
+                {
+                  "toObjectId": 9100101,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 103,
+                      "label": null
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900202"
+              },
+              "to": [
+                {
+                  "toObjectId": 9100101,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 103,
+                      "label": null
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900203"
+              },
+              "to": [
+                {
+                  "toObjectId": 9100102,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 103,
+                      "label": null
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900204"
+              },
+              "to": [
+                {
+                  "toObjectId": 9100102,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 103,
+                      "label": null
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900205"
+              },
+              "to": [
+                {
+                  "toObjectId": 9100103,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 103,
+                      "label": null
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900206"
+              },
+              "to": [
+                {
+                  "toObjectId": 9100103,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 103,
+                      "label": null
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900207"
+              },
+              "to": [
+                {
+                  "toObjectId": 9100104,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 103,
+                      "label": null
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900208"
+              },
+              "to": [
+                {
+                  "toObjectId": 9100104,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 103,
+                      "label": null
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900209"
+              },
+              "to": [
+                {
+                  "toObjectId": 9100101,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 103,
+                      "label": null
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900211"
+              },
+              "to": [
+                {
+                  "toObjectId": 9100105,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 103,
+                      "label": null
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900212"
+              },
+              "to": [
+                {
+                  "toObjectId": 9100105,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 103,
+                      "label": null
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900213"
+              },
+              "to": [
+                {
+                  "toObjectId": 9100106,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 103,
+                      "label": null
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900214"
+              },
+              "to": [
+                {
+                  "toObjectId": 9100106,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 103,
+                      "label": null
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "from": {
+                "id": "900215"
+              },
+              "to": [
+                {
+                  "toObjectId": 9100104,
+                  "associationTypes": [
+                    {
+                      "category": "USER_DEFINED",
+                      "typeId": 103,
+                      "label": null
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "HubSpot: Batch Read Companies": [
+      {
+        "json": {
+          "status": "COMPLETE",
+          "results": [
+            {
+              "id": "7000101",
+              "properties": {
+                "name": "Apex Logistics",
+                "domain": "apexlogistics.example.com",
+                "customer_tier": "Enterprise"
+              }
+            },
+            {
+              "id": "7000102",
+              "properties": {
+                "name": "Vanguard Cloud",
+                "domain": "vanguardcloud.example.com",
+                "customer_tier": "Growth"
+              }
+            },
+            {
+              "id": "7000103",
+              "properties": {
+                "name": "Orchid Health",
+                "domain": "orchidhealth.example.com",
+                "customer_tier": "Mid-Market"
+              }
+            },
+            {
+              "id": "7000104",
+              "properties": {
+                "name": "Summit Retail",
+                "domain": "summitretail.example.com",
+                "customer_tier": "Growth"
+              }
+            },
+            {
+              "id": "7000105",
+              "properties": {
+                "name": "Brightwater Labs",
+                "domain": "brightwater.example.com",
+                "customer_tier": "Enterprise"
+              }
+            },
+            {
+              "id": "7000106",
+              "properties": {
+                "name": "Northwind Media",
+                "domain": "northwindmedia.example.com",
+                "customer_tier": "Mid-Market"
+              }
+            },
+            {
+              "id": "7000107",
+              "properties": {
+                "name": "QA Test Account",
+                "domain": "qa-test.example.com",
+                "customer_tier": "Internal"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "HubSpot: Batch Read Contacts": [
+      {
+        "json": {
+          "status": "COMPLETE",
+          "results": [
+            {
+              "id": "9100101",
+              "properties": {
+                "firstname": "Sarah",
+                "lastname": "Jenkins",
+                "email": "sarah.jenkins@example.com"
+              }
+            },
+            {
+              "id": "9100102",
+              "properties": {
+                "firstname": "Marcus",
+                "lastname": "Vance",
+                "email": "marcus.vance@example.com"
+              }
+            },
+            {
+              "id": "9100103",
+              "properties": {
+                "firstname": "Priya",
+                "lastname": "Nair",
+                "email": "priya.nair@example.com"
+              }
+            },
+            {
+              "id": "9100104",
+              "properties": {
+                "firstname": "Diego",
+                "lastname": "Alvarez",
+                "email": "diego.alvarez@example.com"
+              }
+            },
+            {
+              "id": "9100105",
+              "properties": {
+                "firstname": "Hannah",
+                "lastname": "Cole",
+                "email": "hannah.cole@example.com"
+              }
+            },
+            {
+              "id": "9100106",
+              "properties": {
+                "firstname": "Tom",
+                "lastname": "Becker",
+                "email": "tom.becker@example.com"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "Slack: Post Watchdog Alert": [
+      {
+        "json": {
+          "data": "ok"
+        }
+      },
+      {
+        "json": {
+          "data": "ok"
+        }
+      },
+      {
+        "json": {
+          "data": "ok"
+        }
+      }
+    ],
+    "HubSpot: Update Task Records": [
+      {
+        "json": {
+          "status": "COMPLETE",
+          "results": [
+            {
+              "id": "900201",
+              "properties": {}
+            },
+            {
+              "id": "900215",
+              "properties": {}
+            },
+            {
+              "id": "900204",
+              "properties": {}
+            },
+            {
+              "id": "900202",
+              "properties": {}
+            },
+            {
+              "id": "900213",
+              "properties": {}
+            },
+            {
+              "id": "900203",
+              "properties": {}
+            },
+            {
+              "id": "900212",
+              "properties": {}
+            }
+          ]
+        }
+      }
+    ],
+    "Webhook: Post Run Summary": [
+      {
+        "json": {
+          "received": true
+        }
+      }
+    ]
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": 900
+  },
+  "versionId": "b53c996c-8df2-5bdc-b715-95cc89a971e9",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
